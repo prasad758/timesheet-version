@@ -195,14 +195,17 @@ const Users = () => {
             <Button variant="outline" onClick={() => window.location.href = "/"}>
               Timesheet
             </Button>
-            <Button variant="outline" onClick={() => window.location.href = "/tasks"}>
-              Tasks
+            <Button variant="outline" onClick={() => window.location.href = "/issues"}>
+              Issues
             </Button>
             <Button variant="outline" onClick={() => window.location.href = "/monitoring"}>
               Monitoring
             </Button>
             <Button variant="outline" onClick={() => window.location.href = "/time-clock"}>
               Time Clock
+            </Button>
+            <Button variant="outline" onClick={() => window.location.href = "/leave-calendar"}>
+              Leave Calendar
             </Button>
             <Button variant="outline" onClick={handleSignOut}>
               <LogOut className="mr-2 h-4 w-4" />
@@ -294,7 +297,7 @@ const Users = () => {
               <strong>User:</strong> Can only clock in/out to tasks assigned to them by admins.
             </p>
             <p className="text-muted-foreground mt-4">
-              💡 Tip: Go to the Tasks page to create and assign tasks to users.
+              💡 Tip: Go to the Issues page to create and assign issues to users.
             </p>
           </CardContent>
         </Card>

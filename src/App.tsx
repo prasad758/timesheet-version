@@ -7,10 +7,12 @@ import { AuthGuard } from "./components/AuthGuard";
 import Auth from "./pages/Auth";
 import Timesheet from "./pages/Timesheet";
 import SharedTimesheet from "./pages/SharedTimesheet";
-import TasksAdmin from "./pages/TasksAdmin";
+import Issues from "./pages/Issues";
+import IssueDetail from "./pages/IssueDetail";
 import Users from "./pages/Users";
 import TimeClock from "./pages/TimeClock";
 import Monitoring from "./pages/Monitoring";
+import LeaveCalendar from "./pages/LeaveCalendar";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -32,10 +34,18 @@ const App = () => (
             }
           />
           <Route
-            path="/tasks"
+            path="/issues"
             element={
               <AuthGuard>
-                <TasksAdmin />
+                <Issues />
+              </AuthGuard>
+            }
+          />
+          <Route
+            path="/issues/:id"
+            element={
+              <AuthGuard>
+                <IssueDetail />
               </AuthGuard>
             }
           />
@@ -60,6 +70,14 @@ const App = () => (
             element={
               <AuthGuard>
                 <Monitoring />
+              </AuthGuard>
+            }
+          />
+          <Route
+            path="/leave-calendar"
+            element={
+              <AuthGuard>
+                <LeaveCalendar />
               </AuthGuard>
             }
           />

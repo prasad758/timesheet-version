@@ -9,6 +9,7 @@ import { Plus, Trash2, Save, LogOut, Share2, ChevronLeft, ChevronRight, Download
 import { User } from "@supabase/supabase-js";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import { Notifications } from "@/components/Notifications";
 // import logo from "@/assets/techiemaya-logo.png";
 const logo = "/techiemaya-logo.png";
 
@@ -159,26 +160,112 @@ const Timesheet = () => {
       .eq("week_start", format(weekStart, "yyyy-MM-dd"))
       .single();
 
+    // Load approved leave requests for this week
+    const { data: leaveRequests } = await supabase
+      .from("leave_requests")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("status", "approved")
+      .gte("end_date", format(weekStart, "yyyy-MM-dd"))
+      .lte("start_date", format(weekEnd, "yyyy-MM-dd"));
+
+    // Convert leave requests to timesheet entries
+    const leaveEntries: TimesheetEntry[] = [];
+    if (leaveRequests && leaveRequests.length > 0) {
+      leaveRequests.forEach((leave: any) => {
+        // Parse dates and set to start of day for accurate comparison
+        const leaveStart = new Date(leave.start_date + 'T00:00:00');
+        const leaveEnd = new Date(leave.end_date + 'T23:59:59');
+        
+        // Calculate hours for each day of the week
+        const hours: TimesheetEntry = {
+          project: "Leave",
+          task: leave.leave_type.toUpperCase() + (leave.reason ? ` - ${leave.reason}` : ''),
+          mon_hours: 0,
+          tue_hours: 0,
+          wed_hours: 0,
+          thu_hours: 0,
+          fri_hours: 0,
+          sat_hours: 0,
+          sun_hours: 0,
+          source: 'leave',
+        };
+
+        // Check each day of the week if it falls within leave period
+        for (let i = 0; i < 7; i++) {
+          const currentDay = addDays(weekStart, i);
+          const currentDayStr = format(currentDay, 'yyyy-MM-dd');
+          const leaveStartStr = format(leaveStart, 'yyyy-MM-dd');
+          const leaveEndStr = format(leaveEnd, 'yyyy-MM-dd');
+          
+          // Compare date strings to avoid timezone issues
+          if (currentDayStr >= leaveStartStr && currentDayStr <= leaveEndStr) {
+            const dayMap = ['mon_hours', 'tue_hours', 'wed_hours', 'thu_hours', 'fri_hours', 'sat_hours', 'sun_hours'];
+            const dayKey = dayMap[i] as keyof TimesheetEntry;
+            if (dayKey !== 'project' && dayKey !== 'task' && dayKey !== 'id' && dayKey !== 'source') {
+              hours[dayKey] = 8; // 8 hours for leave days
+            }
+          }
+        }
+
+        leaveEntries.push(hours);
+      });
+    }
+
     if (timesheet) {
       setTimesheetId(timesheet.id);
       if (timesheet.timesheet_entries && timesheet.timesheet_entries.length > 0) {
-        setEntries(
-          timesheet.timesheet_entries.map((entry: any) => ({
-            id: entry.id,
-            project: entry.project,
-            task: entry.task,
-            mon_hours: Number(entry.mon_hours),
-            tue_hours: Number(entry.tue_hours),
-            wed_hours: Number(entry.wed_hours),
-            thu_hours: Number(entry.thu_hours),
-            fri_hours: Number(entry.fri_hours),
-            sat_hours: Number(entry.sat_hours),
-            sun_hours: Number(entry.sun_hours),
-            source: entry.source || 'manual',
-          }))
-        );
+        const regularEntries = timesheet.timesheet_entries.map((entry: any) => ({
+          id: entry.id,
+          project: entry.project,
+          task: entry.task,
+          mon_hours: Number(entry.mon_hours),
+          tue_hours: Number(entry.tue_hours),
+          wed_hours: Number(entry.wed_hours),
+          thu_hours: Number(entry.thu_hours),
+          fri_hours: Number(entry.fri_hours),
+          sat_hours: Number(entry.sat_hours),
+          sun_hours: Number(entry.sun_hours),
+          source: entry.source || 'manual',
+        }));
+        // Combine regular entries with leave entries
+        setEntries([...regularEntries, ...leaveEntries]);
       } else {
-        // Timesheet exists but has no entries
+        // Timesheet exists but has no entries - show leave entries if any
+        if (leaveEntries.length > 0) {
+          setEntries(leaveEntries);
+        } else {
+          setEntries([{
+            project: "",
+            task: "",
+            mon_hours: 0,
+            tue_hours: 0,
+            wed_hours: 0,
+            thu_hours: 0,
+            fri_hours: 0,
+            sat_hours: 0,
+            sun_hours: 0,
+            source: 'manual',
+          }]);
+        }
+      }
+    } else {
+      // No timesheet exists for this week - but show leave entries if any
+      setTimesheetId(null);
+      if (leaveEntries.length > 0) {
+        setEntries([...leaveEntries, {
+          project: "",
+          task: "",
+          mon_hours: 0,
+          tue_hours: 0,
+          wed_hours: 0,
+          thu_hours: 0,
+          fri_hours: 0,
+          sat_hours: 0,
+          sun_hours: 0,
+          source: 'manual',
+        }]);
+      } else {
         setEntries([{
           project: "",
           task: "",
@@ -192,21 +279,6 @@ const Timesheet = () => {
           source: 'manual',
         }]);
       }
-    } else {
-      // No timesheet exists for this week
-      setTimesheetId(null);
-      setEntries([{
-        project: "",
-        task: "",
-        mon_hours: 0,
-        tue_hours: 0,
-        wed_hours: 0,
-        thu_hours: 0,
-        fri_hours: 0,
-        sat_hours: 0,
-        sun_hours: 0,
-        source: 'manual',
-      }]);
     }
   };
 
@@ -553,8 +625,8 @@ const Timesheet = () => {
           <div className="flex gap-2">
             {isAdmin && (
               <>
-                <Button variant="outline" onClick={() => window.location.href = "/tasks"}>
-                  Tasks
+                <Button variant="outline" onClick={() => window.location.href = "/issues"}>
+                  Issues
                 </Button>
                 <Button variant="outline" onClick={() => window.location.href = "/users"}>
                   Users
@@ -567,6 +639,10 @@ const Timesheet = () => {
             <Button variant="outline" onClick={() => window.location.href = "/time-clock"}>
               Time Clock
             </Button>
+            <Button variant="outline" onClick={() => window.location.href = "/leave-calendar"}>
+              Leave Calendar
+            </Button>
+            <Notifications />
             <Button variant="outline" onClick={handleSignOut}>
               <LogOut className="mr-2 h-4 w-4" />
               Sign Out
@@ -678,10 +754,12 @@ const Timesheet = () => {
                 <tbody>
                   {entries.map((entry, index) => {
                     const isTimeClock = entry.source === 'time_clock';
+                    const isLeave = entry.source === 'leave';
+                    const isReadOnly = isTimeClock || isLeave;
                     return (
-                      <tr key={index} className={`hover:bg-muted/50 ${isTimeClock ? 'bg-blue-50/50' : ''}`}>
+                      <tr key={index} className={`hover:bg-muted/50 ${isTimeClock ? 'bg-blue-50/50' : ''} ${isLeave ? 'bg-green-50/50' : ''}`}>
                         <td className="border border-border p-1">
-                          {isTimeClock ? (
+                          {isReadOnly ? (
                             <div className="px-2 py-1 text-sm">{entry.project}</div>
                           ) : (
                             <Input
@@ -695,10 +773,11 @@ const Timesheet = () => {
                           )}
                         </td>
                         <td className="border border-border p-1">
-                          {isTimeClock ? (
+                          {isReadOnly ? (
                             <div className="px-2 py-1 text-sm flex items-center gap-2">
                               {entry.task}
-                              <span className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded">Auto</span>
+                              {isTimeClock && <span className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded">Auto</span>}
+                              {isLeave && <span className="text-xs bg-green-600 text-white px-2 py-0.5 rounded">Leave</span>}
                             </div>
                           ) : (
                             <Input
@@ -711,9 +790,11 @@ const Timesheet = () => {
                         </td>
                         {["mon", "tue", "wed", "thu", "fri", "sat", "sun"].map((day) => (
                           <td key={day} className="border border-border p-1">
-                            {isTimeClock ? (
-                              <div className="text-center text-sm py-1">
-                                {formatHours(Number(entry[`${day}_hours` as keyof TimesheetEntry]) || 0)}
+                            {isReadOnly ? (
+                              <div className="text-center text-sm py-1 font-semibold">
+                                {isLeave && Number(entry[`${day}_hours` as keyof TimesheetEntry]) > 0 
+                                  ? 'PTO' 
+                                  : formatHours(Number(entry[`${day}_hours` as keyof TimesheetEntry]) || 0)}
                               </div>
                             ) : (
                               <Input
@@ -737,7 +818,7 @@ const Timesheet = () => {
                           {formatHours(calculateTotal(entry))}
                         </td>
                         <td className="border border-border p-1 text-center">
-                          {isTimeClock ? (
+                          {isReadOnly ? (
                             <div className="text-xs text-muted-foreground">🔒</div>
                           ) : (
                             <Button
@@ -785,6 +866,21 @@ const Timesheet = () => {
             <div className="mt-6 space-y-2 text-sm text-muted-foreground">
               <p>*Record all time to the nearest 10th of an hour</p>
               <p>*Overtime is not authorized without Customer Management Approval</p>
+              <div className="mt-4 flex gap-4 items-center">
+                <p className="font-semibold text-foreground">Entry Types:</p>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 bg-blue-100 border border-blue-300 rounded"></div>
+                  <span className="text-xs">Time Clock (Auto) 🔒</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 bg-green-100 border border-green-300 rounded"></div>
+                  <span className="text-xs">Approved Leave 🔒</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 bg-white border border-gray-300 rounded"></div>
+                  <span className="text-xs">Manual Entry (Editable)</span>
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>

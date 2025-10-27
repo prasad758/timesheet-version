@@ -6,11 +6,12 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { Clock, MapPin, Pause, RefreshCw } from "lucide-react";
 import { format } from "date-fns";
+import { Notifications } from "@/components/Notifications";
 
 const logo = "/techiemaya-logo.png";
 
-interface Task {
-  id: string;
+interface Issue {
+  id: number;
   title: string;
   project_name?: string;
 }
@@ -23,7 +24,7 @@ interface TimeEntry {
   notes: string | null;
   total_hours: number | null;
   status: string;
-  task: Task | null;
+  issue: Issue | null;
   project_name: string | null;
   pause_start: string | null;
   paused_duration: number | null;
@@ -86,11 +87,16 @@ const Monitoring = () => {
 
       const userMap = new Map(usersData.map((u: any) => [u.user_id, u.email]));
 
+      // Get all recent entries from last 24 hours (not just active ones)
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      
       const { data, error } = await supabase
         .from("time_clock")
-        .select("*, task:tasks(id, title, project_name)")
-        .in("status", ["clocked_in", "paused"])
-        .order("clock_in", { ascending: false });
+        .select("*, issue:issues(id, title, project_name)")
+        .gte("clock_in", yesterday.toISOString())
+        .order("clock_in", { ascending: false })
+        .limit(50);
 
       if (error) throw error;
 
@@ -194,8 +200,11 @@ const Monitoring = () => {
             <Button onClick={() => navigate("/time-clock")} variant="outline">
               Time Clock
             </Button>
-            <Button onClick={() => navigate("/tasks")} variant="outline">
-              Tasks
+            <Button onClick={() => navigate("/leave-calendar")} variant="outline">
+              Leave Calendar
+            </Button>
+            <Button onClick={() => navigate("/issues")} variant="outline">
+              Issues
             </Button>
             <Button onClick={() => navigate("/users")} variant="outline">
               Users
@@ -204,6 +213,7 @@ const Monitoring = () => {
               <RefreshCw className="h-4 w-4 mr-2" />
               Refresh
             </Button>
+            <Notifications />
             <Button onClick={handleSignOut} variant="outline">
               Sign Out
             </Button>
@@ -213,7 +223,7 @@ const Monitoring = () => {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
-              <span>Active Time Entries ({entries.length})</span>
+              <span>Recent Time Entries (Last 24 Hours) - {entries.length}</span>
               <div className="flex items-center gap-4">
                 <select
                   value={selectedUserId}
@@ -234,7 +244,7 @@ const Monitoring = () => {
           <CardContent>
             {entries.length === 0 ? (
               <p className="text-gray-500 dark:text-gray-400 text-center py-8">
-                No active time entries
+                No time entries in the last 24 hours
               </p>
             ) : (
               <div className="space-y-4">
@@ -244,6 +254,8 @@ const Monitoring = () => {
                     className={`p-4 rounded-lg border ${
                       entry.status === "paused"
                         ? "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800"
+                        : entry.status === "clocked_out"
+                        ? "bg-gray-50 dark:bg-gray-900/20 border-gray-200 dark:border-gray-800"
                         : "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800"
                     }`}
                   >
@@ -254,8 +266,8 @@ const Monitoring = () => {
                         <div className="space-y-2 text-sm">
                           <div className="flex items-center gap-2">
                             <Clock className="h-4 w-4" />
-                            <span className="font-medium">Task:</span>
-                            <span>{entry.task?.title || "N/A"}</span>
+                            <span className="font-medium">Issue:</span>
+                            <span>{entry.issue?.title || "N/A"}</span>
                           </div>
                           
                           {entry.project_name && (
@@ -270,10 +282,19 @@ const Monitoring = () => {
                             <span>{format(new Date(entry.clock_in), "MMM dd, yyyy hh:mm a")}</span>
                           </div>
                           
+                          {entry.clock_out && (
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">Clock Out:</span>
+                              <span>{format(new Date(entry.clock_out), "MMM dd, yyyy hh:mm a")}</span>
+                            </div>
+                          )}
+                          
                           <div className="flex items-center gap-2">
-                            <span className="font-medium">Elapsed Time:</span>
+                            <span className="font-medium">{entry.clock_out ? "Total Time:" : "Elapsed Time:"}</span>
                             <span className="text-blue-600 dark:text-blue-400 font-semibold">
-                              {getElapsedTime(entry.clock_in, entry.paused_duration || 0)}
+                              {entry.clock_out 
+                                ? `${entry.total_hours?.toFixed(2) || '0.00'}h`
+                                : getElapsedTime(entry.clock_in, entry.paused_duration || 0)}
                             </span>
                           </div>
 
@@ -282,9 +303,11 @@ const Monitoring = () => {
                             <span className={`px-2 py-1 rounded text-xs font-semibold ${
                               entry.status === "paused"
                                 ? "bg-amber-200 dark:bg-amber-800 text-amber-900 dark:text-amber-100"
+                                : entry.status === "clocked_out"
+                                ? "bg-gray-200 dark:bg-gray-800 text-gray-900 dark:text-gray-100"
                                 : "bg-green-200 dark:bg-green-800 text-green-900 dark:text-green-100"
                             }`}>
-                              {entry.status === "paused" ? "⏸ Paused" : "▶ Active"}
+                              {entry.status === "paused" ? "⏸ Paused" : entry.status === "clocked_out" ? "⏹ Clocked Out" : "▶ Active"}
                             </span>
                           </div>
 

@@ -12,10 +12,11 @@ import { Clock, LogOut, Play, Square, Pause } from "lucide-react";
 import { User } from "@supabase/supabase-js";
 const logo = "/techiemaya-logo.png";
 
-interface Task {
-  id: string;
+interface Issue {
+  id: number;
   title: string;
   project_name?: string;
+  status: string;
 }
 
 interface TimeEntry {
@@ -25,7 +26,7 @@ interface TimeEntry {
   notes: string | null;
   total_hours: number | null;
   status: string; // 'clocked_in' | 'paused' | 'clocked_out'
-  task: Task | null;
+  issue: Issue | null;
   project_name: string | null;
   pause_start: string | null;
   paused_duration: number | null; // Total paused time in hours
@@ -38,8 +39,8 @@ interface TimeEntry {
 
 const TimeClock = () => {
   const [user, setUser] = useState<User | null>(null);
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [selectedTaskId, setSelectedTaskId] = useState<string>("");
+  const [issues, setIssues] = useState<Issue[]>([]);
+  const [selectedIssueId, setSelectedIssueId] = useState<string>("");
   const [projectName, setProjectName] = useState("");
   const [notes, setNotes] = useState("");
   const [currentEntry, setCurrentEntry] = useState<TimeEntry | null>(null);
@@ -54,7 +55,7 @@ const TimeClock = () => {
       if (session?.user) {
         setUser(session.user);
         checkAdminStatus(session.user.id);
-        loadTasks(session.user.id);
+        loadIssues(session.user.id);
         loadCurrentEntry(session.user.id);
         loadTimeEntries(session.user.id);
       }
@@ -72,7 +73,7 @@ const TimeClock = () => {
     setIsAdmin(adminStatus);
   };
 
-  const loadTasks = async (userId: string) => {
+  const loadIssues = async (userId: string) => {
     // Check if user is admin
     const { data: roleData } = await supabase
       .from("user_roles")
@@ -83,30 +84,34 @@ const TimeClock = () => {
     const userIsAdmin = roleData?.role === "admin";
 
     if (userIsAdmin) {
-      // Admin sees all active tasks
+      // Admin sees all open and in-progress issues
       const { data } = await supabase
-        .from("tasks")
-        .select("id, title, project_name")
-        .eq("status", "active")
+        .from("issues")
+        .select("id, title, project_name, status")
+        .in("status", ["open", "in_progress"])
         .order("title");
 
-      setTasks(data || []);
+      setIssues(data || []);
     } else {
-      // Regular users only see assigned tasks
-      const { data: assignedTasks } = await supabase
-        .from("task_assignments")
-        .select("task:tasks(id, title, project_name, status)")
+      // Regular users only see assigned issues
+      const { data: assignedIssues } = await supabase
+        .from("issue_assignees")
+        .select("issue_id")
         .eq("user_id", userId);
 
-      if (assignedTasks) {
-        const activeTasks = assignedTasks
-          .map((a: any) => a.task)
-          .filter((t: any) => t && t.status === "active")
-          .sort((a: any, b: any) => a.title.localeCompare(b.title));
+      if (assignedIssues && assignedIssues.length > 0) {
+        const issueIds = assignedIssues.map((a: any) => a.issue_id);
         
-        setTasks(activeTasks);
+        const { data: activeIssues } = await supabase
+          .from("issues")
+          .select("id, title, project_name, status")
+          .in("id", issueIds)
+          .in("status", ["open", "in_progress"])
+          .order("title");
+        
+        setIssues(activeIssues || []);
       } else {
-        setTasks([]);
+        setIssues([]);
       }
     }
   };
@@ -114,9 +119,9 @@ const TimeClock = () => {
   const loadCurrentEntry = async (userId: string) => {
     const { data } = await supabase
       .from("time_clock")
-      .select("*, task:tasks(id, title)")
+      .select("*, issue:issues(id, title, project_name, status)")
       .eq("user_id", userId)
-      .eq("status", "clocked_in")
+      .in("status", ["clocked_in", "paused"])
       .order("clock_in", { ascending: false })
       .limit(1)
       .single();
@@ -127,7 +132,7 @@ const TimeClock = () => {
   const loadTimeEntries = async (userId: string) => {
     const { data } = await supabase
       .from("time_clock")
-      .select("*, task:tasks(id, title)")
+      .select("*, issue:issues(id, title, project_name, status)")
       .eq("user_id", userId)
       .order("clock_in", { ascending: false })
       .limit(10);
@@ -243,10 +248,10 @@ const TimeClock = () => {
   const clockIn = async () => {
     if (!user) return;
 
-    if (!selectedTaskId) {
+    if (!selectedIssueId) {
       toast({
-        title: "Task Required",
-        description: "Please select a task",
+        title: "Issue Required",
+        description: "Please select an issue",
         variant: "destructive",
       });
       return;
@@ -274,7 +279,7 @@ const TimeClock = () => {
         .from("time_clock")
         .insert({
           user_id: user.id,
-          task_id: selectedTaskId,
+          issue_id: selectedIssueId,
           project_name: projectName,
           clock_in: new Date().toISOString(),
           notes: notes || null,
@@ -284,13 +289,13 @@ const TimeClock = () => {
           location_timestamp: locationTimestamp,
           location_address: locationAddress,
         })
-        .select("*, task:tasks(id, title)")
+        .select("*, issue:issues(id, title, project_name, status)")
         .single();
 
       if (error) throw error;
 
       setCurrentEntry(data);
-      setSelectedTaskId("");
+      setSelectedIssueId("");
       setProjectName("");
       setNotes("");
       
@@ -517,17 +522,17 @@ const TimeClock = () => {
 
     if (!timesheet) return;
 
-    // Get task title and project name
-    const taskTitle = currentEntry.task?.title || "Time Clock Entry";
+    // Get issue title and project name
+    const issueTitle = currentEntry.issue?.title || "Time Clock Entry";
     const projectName = currentEntry.project_name || "Project";
 
-    // Find existing entry for this project and task
+    // Find existing entry for this project and issue
     const { data: existingEntry } = await supabase
       .from("timesheet_entries")
       .select("*")
       .eq("timesheet_id", timesheet.id)
       .eq("project", projectName)
-      .eq("task_title", taskTitle)
+      .eq("task_title", issueTitle)
       .eq("source", "time_clock")
       .single();
 
@@ -545,8 +550,8 @@ const TimeClock = () => {
       await supabase.from("timesheet_entries").insert({
         timesheet_id: timesheet.id,
         project: projectName,
-        task: taskTitle,
-        task_title: taskTitle,
+        task: issueTitle,
+        task_title: issueTitle,
         source: "time_clock",
         mon_hours: dayColumn === "mon_hours" ? parseFloat(hours.toFixed(2)) : 0,
         tue_hours: dayColumn === "tue_hours" ? parseFloat(hours.toFixed(2)) : 0,
@@ -571,10 +576,13 @@ const TimeClock = () => {
             <Button variant="outline" onClick={() => window.location.href = "/"}>
               Timesheet
             </Button>
+            <Button variant="outline" onClick={() => window.location.href = "/leave-calendar"}>
+              Leave Calendar
+            </Button>
             {isAdmin && (
               <>
-                <Button variant="outline" onClick={() => window.location.href = "/tasks"}>
-                  Tasks
+                <Button variant="outline" onClick={() => window.location.href = "/issues"}>
+                  Issues
                 </Button>
                 <Button variant="outline" onClick={() => window.location.href = "/users"}>
                   Users
@@ -614,7 +622,7 @@ const TimeClock = () => {
                     {currentEntry.project_name || "Project"}
                   </p>
                   <p className="text-base">
-                    Task: {currentEntry.task ? currentEntry.task.title : "No task selected"}
+                    Issue: {currentEntry.issue ? `#${currentEntry.issue.id} - ${currentEntry.issue.title}` : "No issue selected"}
                   </p>
                   <p className="text-sm text-muted-foreground">
                     Started: {format(new Date(currentEntry.clock_in), "PPp")}
@@ -660,25 +668,25 @@ const TimeClock = () => {
               <div className="space-y-4">
                 <div>
                   <label className="text-sm font-medium mb-2 block">
-                    Select Task <span className="text-red-500">*</span>
+                    Select Issue <span className="text-red-500">*</span>
                   </label>
                   <select
                     className="w-full p-2 border rounded-md bg-background"
-                    value={selectedTaskId}
+                    value={selectedIssueId}
                     onChange={(e) => {
-                      const taskId = e.target.value;
-                      setSelectedTaskId(taskId);
-                      // Auto-populate project name from selected task
-                      const selectedTask = tasks.find(t => t.id === taskId);
-                      if (selectedTask?.project_name) {
-                        setProjectName(selectedTask.project_name);
+                      const issueId = e.target.value;
+                      setSelectedIssueId(issueId);
+                      // Auto-populate project name from selected issue
+                      const selectedIssue = issues.find(i => String(i.id) === issueId);
+                      if (selectedIssue?.project_name) {
+                        setProjectName(selectedIssue.project_name);
                       }
                     }}
                   >
-                    <option value="">Select a task...</option>
-                    {tasks.map((task) => (
-                      <option key={task.id} value={task.id}>
-                        {task.title}
+                    <option value="">Select an issue...</option>
+                    {issues.map((issue) => (
+                      <option key={issue.id} value={issue.id}>
+                        #{issue.id} - {issue.title}
                       </option>
                     ))}
                   </select>
@@ -731,7 +739,7 @@ const TimeClock = () => {
                           }`}
                         />
                         <h3 className="font-semibold">
-                          {entry.task ? entry.task.title : "No task"}
+                          {entry.issue ? `#${entry.issue.id} - ${entry.issue.title}` : "No issue"}
                         </h3>
                         {entry.status === "paused" && (
                           <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900 text-amber-800 dark:text-amber-200">
