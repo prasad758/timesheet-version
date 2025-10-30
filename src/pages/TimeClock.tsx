@@ -49,6 +49,8 @@ const TimeClock = () => {
   const [isAdmin, setIsAdmin] = useState(false);
   const [showPauseDialog, setShowPauseDialog] = useState(false);
   const [pauseReason, setPauseReason] = useState("");
+  const [showClockOutDialog, setShowClockOutDialog] = useState(false);
+  const [clockOutComment, setClockOutComment] = useState("");
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -334,6 +336,19 @@ const TimeClock = () => {
   const clockOut = async () => {
     if (!user || !currentEntry) return;
 
+    // First show the comment dialog if there's an issue associated
+    if (currentEntry.issue) {
+      setShowClockOutDialog(true);
+      return;
+    }
+
+    // If no issue, proceed with direct clock out
+    await performClockOut();
+  };
+
+  const performClockOut = async (comment?: string) => {
+    if (!user || !currentEntry) return;
+
     setLoading(true);
     try {
       const clockOutTime = new Date();
@@ -357,13 +372,36 @@ const TimeClock = () => {
 
       if (error) throw error;
 
+      // Add comment to issue if provided
+      if (comment && currentEntry.issue) {
+        await supabase.from("issue_comments").insert({
+          issue_id: currentEntry.issue.id,
+          user_id: user.id,
+          comment: comment,
+        });
+
+        // Add activity entry
+        await supabase.from("issue_activity").insert({
+          issue_id: currentEntry.issue.id,
+          user_id: user.id,
+          action: 'work_completed',
+          details: { 
+            comment: comment.substring(0, 100),
+            hours_worked: parseFloat(hours.toFixed(2))
+          }
+        });
+      }
+
       // Add to weekly timesheet
       await addToTimesheet(clockInTime, hours);
 
       setCurrentEntry(null);
+      setShowClockOutDialog(false);
+      setClockOutComment("");
+      
       toast({
         title: "Clocked Out",
-        description: `Total time: ${hours.toFixed(2)} hours added to timesheet`,
+        description: `Total time: ${hours.toFixed(2)} hours added to timesheet${comment ? ' with comment' : ''}`,
       });
       loadTimeEntries(user.id);
     } catch (error: any) {
@@ -834,6 +872,73 @@ const TimeClock = () => {
               disabled={loading || !pauseReason.trim()}
             >
               Pause Work
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Clock Out Comment Dialog */}
+      <Dialog open={showClockOutDialog} onOpenChange={(open) => {
+        if (!open) {
+          setShowClockOutDialog(false);
+          setClockOutComment("");
+        }
+      }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Add Work Comment</DialogTitle>
+            <DialogDescription>
+              Please add a comment about the work you completed on this issue before clocking out.
+              This helps track progress and provides context for your time.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            {currentEntry?.issue && (
+              <div className="p-4 bg-muted rounded-lg">
+                <h3 className="font-semibold text-sm mb-2">Working on:</h3>
+                <p className="text-sm">
+                  <strong>#{currentEntry.issue.id}</strong> - {currentEntry.issue.title}
+                </p>
+                {currentEntry.project_name && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Project: {currentEntry.project_name}
+                  </p>
+                )}
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label htmlFor="clockOutComment">
+                Work Summary <span className="text-red-500">*</span>
+              </Label>
+              <Textarea
+                id="clockOutComment"
+                placeholder="Describe what you worked on, completed, or any blockers encountered..."
+                value={clockOutComment}
+                onChange={(e) => setClockOutComment(e.target.value)}
+                rows={4}
+                className="min-h-[100px]"
+              />
+              <p className="text-xs text-muted-foreground">
+                This comment will be added to the issue and helps track your progress.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowClockOutDialog(false);
+                setClockOutComment("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => performClockOut(clockOutComment)}
+              disabled={loading || !clockOutComment.trim()}
+              variant="destructive"
+            >
+              Clock Out & Submit Comment
             </Button>
           </DialogFooter>
         </DialogContent>
