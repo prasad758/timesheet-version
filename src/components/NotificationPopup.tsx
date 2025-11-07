@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Clock, Bell, Calendar, CheckCircle, AlertCircle } from "lucide-react";
@@ -39,60 +39,26 @@ export function NotificationPopup() {
       }
     }, 30 * 60 * 1000);
     
-    // Subscribe to real-time notifications from database
-    const subscription = supabase
-      .channel("notification-popup")
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "notifications",
-        },
-        (payload) => {
-          // Show toast for new database notifications in real-time (but only if popup was already shown)
-          if (payload.new && hasChecked) {
-            const newNotification = payload.new as any;
-            const notificationId = newNotification.id;
-            
-            // Check if this notification is for the current user and hasn't been shown
-            supabase.auth.getSession().then(({ data: { session } }) => {
-              if (session?.user && newNotification.user_id === session.user.id && !shownNotificationIdsRef.current.has(notificationId)) {
-                toast.info(newNotification.title, {
-                  description: newNotification.message,
-                  duration: 5000,
-                  action: newNotification.link ? {
-                    label: "View",
-                    onClick: () => navigate(newNotification.link),
-                  } : undefined,
-                });
-                
-                setShownNotificationIds(prev => {
-                  const newSet = new Set(prev);
-                  newSet.add(notificationId);
-                  return newSet;
-                });
-              }
-            });
-          }
-        }
-      )
-      .subscribe();
-
+    // Poll for new notifications (real-time subscription removed - using polling instead)
     return () => {
       clearInterval(interval);
-      subscription.unsubscribe();
     };
   }, [navigate, hasChecked]);
 
   const checkNotifications = async () => {
-    const { data: session } = await supabase.auth.getSession();
-    if (!session.session?.user) {
+    // Get user from localStorage
+    const userData = localStorage.getItem('user');
+    if (!userData) {
       setHasChecked(true);
       return;
     }
 
-    const userId = session.session.user.id;
+    const user = JSON.parse(userData);
+    const userId = user.id;
+    if (!userId) {
+      setHasChecked(true);
+      return;
+    }
     const items: NotificationItem[] = [];
 
     // Check clock-in status
@@ -175,58 +141,53 @@ export function NotificationPopup() {
         const todayStart = new Date();
         todayStart.setHours(0, 0, 0, 0);
         
-        const { data: todayEntry, error } = await supabase
-          .from("time_clock")
-          .select("id, clock_in, status")
-          .eq("user_id", userId)
-          .gte("clock_in", todayStart.toISOString())
-          .order("clock_in", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (error && error.code !== 'PGRST116') {
-          console.error("Error checking clock-in:", error);
-          return;
-        }
-
-        // If no entry today or last entry was clocked out, show reminder
-        // But only if we haven't shown it today
-        if ((!todayEntry || todayEntry.status === "clocked_out") && !wasDismissedToday) {
-          items.push({
-            id: "clock-in-reminder",
-            type: "clock_in",
-            title: "⏰ Time to Clock In!",
-            message: "You haven't clocked in today. Don't forget to track your time!",
-            action: () => {
-              navigate("/time-clock");
-              setOpen(false);
-            },
-            link: "/time-clock",
-          });
+        try {
+          const currentEntry = await api.timesheets.getCurrent() as any;
+          
+          // If no entry today or last entry was clocked out, show reminder
+          // But only if we haven't shown it today
+          if (!currentEntry && !wasDismissedToday) {
+            items.push({
+              id: "clock-in-reminder",
+              type: "clock_in",
+              title: "⏰ Time to Clock In!",
+              message: "You haven't clocked in today. Don't forget to track your time!",
+              action: () => {
+                navigate("/time-clock");
+                setOpen(false);
+              },
+              link: "/time-clock",
+            });
+          }
+        } catch (error) {
+          // If error, assume no clock-in and show reminder
+          if (!wasDismissedToday) {
+            items.push({
+              id: "clock-in-reminder",
+              type: "clock_in",
+              title: "⏰ Time to Clock In!",
+              message: "You haven't clocked in today. Don't forget to track your time!",
+              action: () => {
+                navigate("/time-clock");
+                setOpen(false);
+              },
+              link: "/time-clock",
+            });
+          }
         }
       }
     } catch (error) {
-      console.error("Error checking clock-in reminder:", error);
+      // Silently fail - don't show error for clock-in reminder
     }
   };
 
   const checkDatabaseNotifications = async (userId: string, items: NotificationItem[]) => {
     try {
-      const { data, error } = await supabase
-        .from("notifications")
-        .select("*")
-        .eq("user_id", userId)
-        .eq("read", false)
-        .order("created_at", { ascending: false })
-        .limit(5);
+      const response = await api.notifications.getAll(true) as any; // unreadOnly = true
+      const notifications = response.notifications || response || [];
 
-      if (error) {
-        console.error("Error loading notifications:", error);
-        return;
-      }
-
-      if (data && data.length > 0) {
-        data.forEach((notification) => {
+      if (notifications.length > 0) {
+        notifications.slice(0, 5).forEach((notification: any) => {
           const item: NotificationItem = {
             id: notification.id,
             type: notification.type as any,
@@ -247,24 +208,21 @@ export function NotificationPopup() {
         });
       }
     } catch (error) {
-      console.error("Error checking database notifications:", error);
+      // Silently fail - don't show error for notifications
     }
   };
 
   const checkLeaveRequests = async (userId: string, items: NotificationItem[]) => {
     try {
       // Check if user has pending leave requests
-      const { data: pendingLeave, error: leaveError } = await supabase
-        .from("leave_requests")
-        .select("id, start_date, end_date, status")
-        .eq("user_id", userId)
-        .eq("status", "pending")
-        .limit(1)
-        .maybeSingle();
+      const response = await api.leave.getAll() as any;
+      const leaveRequests = Array.isArray(response) ? response : (response.leave_requests || []);
 
-      if (leaveError && leaveError.code !== 'PGRST116') {
-        console.error("Error checking leave requests:", leaveError);
-      } else if (pendingLeave) {
+      const pendingLeave = leaveRequests.find((req: any) => 
+        req.user_id === userId && req.status === 'pending'
+      );
+
+      if (pendingLeave) {
         items.push({
           id: `leave-${pendingLeave.id}`,
           type: "leave_request",
@@ -279,75 +237,67 @@ export function NotificationPopup() {
       }
 
       // Check if user is admin and has pending leave requests to approve
-      const { data: roleData } = await supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", userId)
-        .maybeSingle();
-
-      if (roleData?.role === "admin") {
-        const { data: pendingApprovals, error: approvalError } = await supabase
-          .from("leave_requests")
-          .select("id, start_date, user_id, profiles:user_id(email)")
-          .eq("status", "pending")
-          .limit(5);
-
-        if (!approvalError && pendingApprovals && pendingApprovals.length > 0) {
-          items.push({
-            id: "leave-approvals-pending",
-            type: "leave_request",
-            title: "📋 Leave Requests Pending Approval",
-            message: `You have ${pendingApprovals.length} leave request(s) waiting for your approval`,
-            action: () => {
-              navigate("/leave-calendar");
-              setOpen(false);
-            },
-            link: "/leave-calendar",
-          });
+      try {
+        const currentUser = await api.auth.getMe() as any;
+        if (currentUser?.user?.role === "admin") {
+          const pendingApprovals = leaveRequests.filter((req: any) => req.status === 'pending');
+          
+          if (pendingApprovals.length > 0) {
+            items.push({
+              id: "leave-approvals-pending",
+              type: "leave_request",
+              title: "📋 Leave Requests Pending Approval",
+              message: `You have ${pendingApprovals.length} leave request(s) waiting for your approval`,
+              action: () => {
+                navigate("/leave-calendar");
+                setOpen(false);
+              },
+              link: "/leave-calendar",
+            });
+          }
         }
+      } catch (error) {
+        // Silently fail admin check
       }
     } catch (error) {
-      console.error("Error checking leave requests:", error);
+      // Silently fail - don't show error for leave requests
     }
   };
 
   const checkIssueAssignments = async (userId: string, items: NotificationItem[]) => {
     try {
       // Check for recently assigned issues (within last 24 hours)
+      const response = await api.issues.getAll() as any;
+      const issues = response.issues || response || [];
+
+      // Filter issues assigned to this user that were created in the last 24 hours
       const yesterday = new Date();
       yesterday.setDate(yesterday.getDate() - 1);
 
-      const { data: recentAssignments, error } = await supabase
-        .from("issue_assignees")
-        .select("issue_id, created_at, issues:issue_id(id, title)")
-        .eq("user_id", userId)
-        .gte("created_at", yesterday.toISOString())
-        .limit(5);
+      const recentAssignments = issues.filter((issue: any) => {
+        if (!issue.assignees || !Array.isArray(issue.assignees)) return false;
+        const isAssigned = issue.assignees.some((assignee: any) => assignee.user_id === userId || assignee.id === userId);
+        const isRecent = new Date(issue.created_at || issue.createdAt) >= yesterday;
+        return isAssigned && isRecent;
+      }).slice(0, 5);
 
-      if (error) {
-        console.error("Error checking issue assignments:", error);
-        return;
-      }
-
-      if (recentAssignments && recentAssignments.length > 0) {
-        recentAssignments.forEach((assignment: any) => {
-          if (assignment.issues) {
-            items.push({
-              id: `issue-${assignment.issue_id}`,
-              type: "issue_assigned",
-              title: "📋 New Issue Assigned",
-              message: `You've been assigned to: ${assignment.issues.title}`,
-              action: () => {
-                navigate(`/issues/${assignment.issue_id}`);
-                setOpen(false);
-              },
-              link: `/issues/${assignment.issue_id}`,
-            });
-          }
+      if (recentAssignments.length > 0) {
+        recentAssignments.forEach((issue: any) => {
+          items.push({
+            id: `issue-${issue.id}`,
+            type: "issue_assigned",
+            title: "📋 New Issue Assigned",
+            message: `You've been assigned to: ${issue.title}`,
+            action: () => {
+              navigate(`/issues/${issue.id}`);
+              setOpen(false);
+            },
+            link: `/issues/${issue.id}`,
+          });
         });
       }
     } catch (error) {
-      console.error("Error checking issue assignments:", error);
+      // Silently fail - don't show error for issue assignments
     }
   };
 

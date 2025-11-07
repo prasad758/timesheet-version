@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -57,124 +57,81 @@ export default function Issues() {
 
   useEffect(() => {
     const initPage = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
+      try {
+        const userData = JSON.parse(localStorage.getItem('user') || '{}');
+        if (!userData.id) {
         navigate("/auth");
         return;
       }
 
-      setCurrentUser(session.user);
-      await checkAdminStatus(session.user.id);
+        setCurrentUser(userData);
+        const currentUser = await api.auth.getMe() as any;
+        setIsAdmin(currentUser?.user?.role === 'admin');
       await loadLabels();
       await loadUsers();
       await loadIssues();
+      } catch (error) {
+        console.error('Error initializing page:', error);
+        navigate("/auth");
+      } finally {
       setLoading(false);
+      }
     };
 
     initPage();
   }, [navigate]);
 
-  const checkAdminStatus = async (userId: string) => {
-    const { data } = await supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", userId)
-      .maybeSingle();
-
-    setIsAdmin(data?.role === "admin");
-  };
-
   const loadLabels = async () => {
-    const { data, error } = await supabase
-      .from("labels")
-      .select("*")
-      .order("name");
-
-    if (error) {
+    try {
+      const response = await api.labels.getAll() as any;
+      setLabels(response.labels || response || []);
+    } catch (error) {
       console.error("Error loading labels:", error);
-    } else {
-      setLabels(data || []);
+      setLabels([]);
     }
   };
 
   const loadUsers = async () => {
-    const { data, error } = await supabase.rpc("get_all_users_with_roles");
-
-    if (error) {
+    try {
+      const response = await api.users.getWithRoles() as any;
+      const usersData = response.users || response || [];
+      setUsers(usersData);
+    } catch (error) {
       console.error("Error loading users:", error);
-    } else {
-      setUsers(data || []);
+      setUsers([]);
     }
   };
 
   const loadIssues = async () => {
-    let query = supabase
-      .from("issues")
-      .select(`
-        *,
-        issue_assignees (
-          user_id
-        ),
-        issue_labels (
-          label_id,
-          labels (
-            id,
-            name,
-            color
-          )
-        )
-      `)
-      .order("created_at", { ascending: false });
-
+    try {
+      const params: any = {};
     if (filterStatus !== 'all') {
-      query = query.eq('status', filterStatus);
+        params.status = filterStatus;
+      }
+      if (filterAssignee !== 'all') {
+        params.assignee = filterAssignee;
     }
 
-    const { data, error } = await query;
+      const response = await api.issues.getAll(params) as any;
+      const issuesData = response.issues || response || [];
+      
+      // Transform issues to match interface
+      const transformedIssues = issuesData.map((issue: any) => ({
+        ...issue,
+        assignees: issue.assignees || [],
+        labels: issue.labels || []
+      }));
 
-    if (error) {
+      setIssues(transformedIssues);
+    } catch (error) {
+      console.error("Error loading issues:", error);
       toast({
         title: "Error",
         description: "Failed to load issues",
         variant: "destructive",
       });
-      return;
+      setIssues([]);
     }
-
-    // Transform the data to match our interface
-    const transformedIssues = await Promise.all((data || []).map(async (issue: any) => {
-      // Get assignee emails
-      const assigneeEmails = await Promise.all(
-        (issue.issue_assignees || []).map(async (assignment: any) => {
-          const user = users.find(u => u.user_id === assignment.user_id);
-          return {
-            user_id: assignment.user_id,
-            email: user?.email || 'Unknown'
-          };
-        })
-      );
-
-      // Get labels
-      const issueLabels = (issue.issue_labels || [])
-        .map((il: any) => il.labels)
-        .filter(Boolean);
-
-      return {
-        ...issue,
-        assignees: assigneeEmails,
-        labels: issueLabels
-      };
-    }));
-
-    // Apply assignee filter
-    let filteredIssues = transformedIssues;
-    if (filterAssignee !== 'all') {
-      filteredIssues = transformedIssues.filter(issue =>
-        issue.assignees.some(a => a.user_id === filterAssignee)
-      );
-    }
-
-    setIssues(filteredIssues);
   };
 
   const createIssue = async () => {
@@ -189,53 +146,41 @@ export default function Issues() {
 
     setLoading(true);
 
-    const { data, error } = await supabase
-      .from("issues")
-      .insert({
+    try {
+      const response = await api.issues.create({
         title: newIssueTitle,
         description: newIssueDescription,
         project_name: newIssueProjectName,
         priority: newIssuePriority,
-        created_by: currentUser?.id,
         status: 'open'
-      })
-      .select()
-      .single();
+      }) as any;
 
-    if (error) {
+      toast({
+        title: "Success",
+        description: "Issue created successfully",
+      });
+
+      setShowCreateDialog(false);
+      setNewIssueTitle("");
+      setNewIssueDescription("");
+      setNewIssueProjectName("");
+      setNewIssuePriority('medium');
+      await loadIssues();
+    } catch (error: any) {
       toast({
         title: "Error",
         description: error.message || "Failed to create issue",
         variant: "destructive",
       });
-    } else {
-      // Create activity entry
-      await supabase.from("issue_activity").insert({
-        issue_id: data.id,
-        user_id: currentUser?.id,
-        action: 'created',
-        details: { title: newIssueTitle }
-      });
-
-      toast({
-        title: "Success",
-        description: `Issue #${data.id} created successfully`,
-      });
-
-      setNewIssueTitle("");
-      setNewIssueDescription("");
-      setNewIssueProjectName("");
-      setNewIssuePriority('medium');
-      setShowCreateDialog(false);
-      loadIssues();
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   const handleSignOut = async () => {
     try {
-      await supabase.auth.signOut();
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('user');
     } catch (error) {
       // Ignore errors
     } finally {

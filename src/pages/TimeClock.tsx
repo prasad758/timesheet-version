@@ -5,11 +5,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
-import { format, startOfWeek, endOfWeek } from "date-fns";
+import { format } from "date-fns";
 import { Clock, LogOut, Play, Square, Pause } from "lucide-react";
-import { User } from "@supabase/supabase-js";
 const logo = "/techiemaya-logo.png";
 
 interface Issue {
@@ -38,7 +37,7 @@ interface TimeEntry {
 }
 
 const TimeClock = () => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<any>(null);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [selectedIssueId, setSelectedIssueId] = useState<string>("");
   const [projectName, setProjectName] = useState("");
@@ -51,76 +50,61 @@ const TimeClock = () => {
   const [pauseReason, setPauseReason] = useState("");
   const [showClockOutDialog, setShowClockOutDialog] = useState(false);
   const [clockOutComment, setClockOutComment] = useState("");
+  const [initializing, setInitializing] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        setUser(session.user);
-        checkAdminStatus(session.user.id);
-        loadIssues(session.user.id);
-        loadCurrentEntry(session.user.id);
-        loadTimeEntries(session.user.id);
+    const initUser = async () => {
+      try {
+        setInitializing(true);
+        const userData = JSON.parse(localStorage.getItem('user') || '{}');
+        const token = localStorage.getItem('auth_token');
+        
+        if (!userData.id || !token) {
+          // Redirect to auth if not logged in
+          window.location.href = '/auth';
+          return;
+        }
+        
+        setUser(userData);
+        const currentUser = await api.auth.getMe() as any;
+        const adminStatus = currentUser?.user?.role === 'admin';
+        setIsAdmin(adminStatus);
+        await loadIssues();
+        await loadCurrentEntry();
+        await loadTimeEntries();
+      } catch (error: any) {
+        console.error('Error initializing user:', error);
+        // If auth fails, redirect to login
+        if (error?.message?.includes('401') || error?.message?.includes('Unauthorized')) {
+          window.location.href = '/auth';
+          return;
+        }
+      } finally {
+        setInitializing(false);
       }
-    });
+    };
+    initUser();
   }, []);
 
-  const checkAdminStatus = async (userId: string) => {
-    const { data } = await supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", userId)
-      .single();
-
-    const adminStatus = data?.role === "admin";
-    setIsAdmin(adminStatus);
-  };
-
-  const loadIssues = async (userId: string) => {
+  const loadIssues = async () => {
     try {
-      // Single query: check admin status and load issues in parallel
-      const [roleResult, assignedIssuesResult] = await Promise.all([
-        supabase
-          .from("user_roles")
-          .select("role")
-          .eq("user_id", userId)
-          .maybeSingle(),
-        // Pre-fetch assigned issues for non-admins
-        supabase
-          .from("issue_assignees")
-          .select("issue_id")
-          .eq("user_id", userId)
-      ]);
-
-      const userIsAdmin = roleResult.data?.role === "admin";
-
-      if (userIsAdmin) {
-        // Admin sees all open and in-progress issues
-        const { data } = await supabase
-          .from("issues")
-          .select("id, title, project_name, status")
-          .in("status", ["open", "in_progress"])
-          .order("title");
-
-        setIssues(data || []);
-      } else {
-        // Regular users only see assigned issues - use pre-fetched data
-        const assignedIssues = assignedIssuesResult.data || [];
-        
-        if (assignedIssues.length > 0) {
-          const issueIds = assignedIssues.map((a: any) => a.issue_id);
-          
-          const { data: activeIssues } = await supabase
-            .from("issues")
-            .select("id, title, project_name, status")
-            .in("id", issueIds)
-            .in("status", ["open", "in_progress"])
-            .order("title");
-          
-          setIssues(activeIssues || []);
-        } else {
-          setIssues([]);
-        }
-      }
+      const response = await api.issues.getAll() as any;
+      const allIssues = response?.issues || response || [];
+      
+      // Filter open and in-progress issues
+      const activeIssues = allIssues.filter((issue: any) => 
+        issue.status === 'open' || issue.status === 'in_progress'
+      );
+      
+      // Transform to match Issue interface
+      const transformedIssues = activeIssues.map((issue: any) => ({
+        id: issue.id,
+        title: issue.title,
+        project_name: issue.project_name,
+        status: issue.status,
+      }));
+      
+      setIssues(transformedIssues);
     } catch (error) {
       if (process.env.NODE_ENV === 'development') {
         console.error("Error loading issues:", error);
@@ -129,24 +113,33 @@ const TimeClock = () => {
     }
   };
 
-  const loadCurrentEntry = async (userId: string) => {
+  const loadCurrentEntry = async () => {
     try {
-      const { data, error } = await supabase
-        .from("time_clock")
-        .select("*, issue:issues(id, title, project_name, status)")
-        .eq("user_id", userId)
-        .in("status", ["clocked_in", "paused"])
-        .order("clock_in", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (error && error.code !== 'PGRST116') {
-        if (process.env.NODE_ENV === 'development') {
-          console.error("Error loading current entry:", error);
-        }
+      const response = await api.timesheets.getCurrent() as any;
+      const entry = response?.entry;
+      
+      if (entry) {
+        // Transform API response to TimeEntry format
+        setCurrentEntry({
+          id: entry.id,
+          clock_in: entry.clock_in,
+          clock_out: entry.clock_out,
+          notes: entry.notes,
+          total_hours: entry.total_hours,
+          status: entry.status,
+          issue: entry.issue,
+          project_name: entry.project_name,
+          pause_start: entry.pause_start,
+          paused_duration: entry.paused_duration,
+          pause_reason: entry.pause_reason,
+          latitude: entry.latitude,
+          longitude: entry.longitude,
+          location_timestamp: entry.location_timestamp,
+          location_address: entry.location_address,
+        });
+      } else {
+        setCurrentEntry(null);
       }
-
-      setCurrentEntry(data || null);
     } catch (error) {
       if (process.env.NODE_ENV === 'development') {
         console.error("Error loading current entry:", error);
@@ -155,24 +148,31 @@ const TimeClock = () => {
     }
   };
 
-  const loadTimeEntries = async (userId: string) => {
+  const loadTimeEntries = async () => {
     try {
-      const { data, error } = await supabase
-        .from("time_clock")
-        .select("*, issue:issues(id, title, project_name, status)")
-        .eq("user_id", userId)
-        .order("clock_in", { ascending: false })
-        .limit(10);
-
-      if (error) {
-        if (process.env.NODE_ENV === 'development') {
-          console.error("Error loading time entries:", error);
-        }
-        setTimeEntries([]);
-        return;
-      }
-
-      setTimeEntries(data || []);
+      const response = await api.timesheets.getEntries({ limit: 10 }) as any;
+      const entries = response?.entries || [];
+      
+      // Transform API response to TimeEntry format
+      const transformedEntries = entries.map((entry: any) => ({
+        id: entry.id,
+        clock_in: entry.clock_in,
+        clock_out: entry.clock_out,
+        notes: entry.notes,
+        total_hours: entry.total_hours,
+        status: entry.status,
+        issue: entry.issue,
+        project_name: entry.project_name,
+        pause_start: entry.pause_start,
+        paused_duration: entry.paused_duration,
+        pause_reason: entry.pause_reason,
+        latitude: entry.latitude,
+        longitude: entry.longitude,
+        location_timestamp: entry.location_timestamp,
+        location_address: entry.location_address,
+      }));
+      
+      setTimeEntries(transformedEntries);
     } catch (error) {
       if (process.env.NODE_ENV === 'development') {
         console.error("Error loading time entries:", error);
@@ -183,7 +183,8 @@ const TimeClock = () => {
 
   const handleSignOut = async () => {
     try {
-      await supabase.auth.signOut();
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('user');
     } catch (error) {
       console.error("Sign out error (ignoring):", error);
     } finally {
@@ -308,7 +309,6 @@ const TimeClock = () => {
 
       // Get user location
       const location = await getUserLocation();
-      const locationTimestamp = location ? new Date().toISOString() : null;
       
       // Get address from coordinates (if location available)
       let locationAddress = null;
@@ -316,26 +316,39 @@ const TimeClock = () => {
         locationAddress = await getAddressFromCoordinates(location.latitude, location.longitude);
       }
 
-      const { data, error } = await supabase
-        .from("time_clock")
-        .insert({
-          user_id: user.id,
-          issue_id: selectedIssueId,
-          project_name: projectName,
-          clock_in: new Date().toISOString(),
-          notes: notes || null,
-          status: "clocked_in",
-          latitude: location?.latitude || null,
-          longitude: location?.longitude || null,
-          location_timestamp: locationTimestamp,
-          location_address: locationAddress,
-        })
-        .select("*, issue:issues(id, title, project_name, status)")
-        .single();
+      const issueIdNum = selectedIssueId ? parseInt(selectedIssueId, 10) : null;
+      if (!issueIdNum || isNaN(issueIdNum)) {
+        throw new Error('Invalid issue selected');
+      }
 
-      if (error) throw error;
+      const response = await api.timesheets.clockIn({
+        issue_id: issueIdNum,
+        project_name: projectName || null,
+        latitude: location?.latitude || null,
+        longitude: location?.longitude || null,
+        location_address: locationAddress || null,
+      }) as any;
 
-      setCurrentEntry(data);
+      const entry = response?.entry;
+      
+      // Transform API response to TimeEntry format
+      setCurrentEntry({
+        id: entry.id,
+        clock_in: entry.clock_in,
+        clock_out: entry.clock_out,
+        notes: notes || null,
+        total_hours: entry.total_hours,
+        status: entry.status,
+        issue: entry.issue,
+        project_name: entry.project_name,
+        pause_start: entry.pause_start,
+        paused_duration: entry.paused_duration,
+        pause_reason: entry.pause_reason,
+        latitude: entry.latitude,
+        longitude: entry.longitude,
+        location_timestamp: entry.location_timestamp,
+        location_address: entry.location_address,
+      });
       setSelectedIssueId("");
       setProjectName("");
       setNotes("");
@@ -360,7 +373,7 @@ const TimeClock = () => {
         title: "Clocked In Successfully",
         description: `Time tracking started!${locationMsg}`,
       });
-      loadTimeEntries(user.id);
+      loadTimeEntries();
     } catch (error: any) {
       toast({
         title: "Error",
@@ -375,14 +388,8 @@ const TimeClock = () => {
   const clockOut = async () => {
     if (!user || !currentEntry) return;
 
-    // First show the comment dialog if there's an issue associated
-    if (currentEntry.issue) {
-      setShowClockOutDialog(true);
-      return;
-    }
-
-    // If no issue, proceed with direct clock out
-    await performClockOut();
+    // Always show the comment dialog to get work summary/bloggers
+    setShowClockOutDialog(true);
   };
 
   const performClockOut = async (comment?: string) => {
@@ -390,67 +397,28 @@ const TimeClock = () => {
 
     setLoading(true);
     try {
-      const clockOutTime = new Date();
-      const clockInTime = new Date(currentEntry.clock_in);
-      
-      // Calculate total hours excluding paused time
-      let totalMilliseconds = clockOutTime.getTime() - clockInTime.getTime();
-      const pausedMilliseconds = (currentEntry.paused_duration || 0) * 60 * 60 * 1000;
-      const actualWorkMilliseconds = totalMilliseconds - pausedMilliseconds;
-      const hours = actualWorkMilliseconds / (1000 * 60 * 60);
-
-      // Update time_clock entry
-      const { error } = await supabase
-        .from("time_clock")
-        .update({
-          clock_out: clockOutTime.toISOString(),
-          total_hours: parseFloat(hours.toFixed(2)),
-          status: "clocked_out",
-        })
-        .eq("id", currentEntry.id);
-
-      if (error) throw error;
-
-      // Add comment to issue if provided
-      if (comment && currentEntry.issue) {
-        await supabase.from("issue_comments").insert({
-          issue_id: currentEntry.issue.id,
-          user_id: user.id,
-          comment: comment,
-        });
-
-        // Add activity entry
-        await supabase.from("issue_activity").insert({
-          issue_id: currentEntry.issue.id,
-          user_id: user.id,
-          action: 'work_completed',
-          details: { 
-            comment: comment.substring(0, 100),
-            hours_worked: parseFloat(hours.toFixed(2))
-          }
-        });
-      }
-
-      // Add to weekly timesheet
-      try {
-        await addToTimesheet(clockInTime, hours);
-        toast({
-          title: "Clocked Out",
-          description: `Total time: ${hours.toFixed(2)} hours added to timesheet${comment ? ' with comment' : ''}. Refresh timesheet page to see updates.`,
-        });
-      } catch (timesheetError: any) {
-        console.error("Error updating timesheet:", timesheetError);
-        toast({
-          title: "Clocked Out",
-          description: `Total time: ${hours.toFixed(2)} hours. Note: There was an issue updating the timesheet.`,
-          variant: "destructive",
-        });
-      }
+      const response = await api.timesheets.clockOut({ comment: comment || undefined }) as any;
+      const totalHours = response?.total_hours || 0;
 
       setCurrentEntry(null);
       setShowClockOutDialog(false);
       setClockOutComment("");
-      loadTimeEntries(user.id);
+      
+      // Dispatch custom event to notify timesheet page to refresh
+      window.dispatchEvent(new CustomEvent('timesheetClockOut', {
+        detail: { totalHours, timestamp: Date.now() }
+      }));
+      
+      // Also set localStorage trigger for cross-tab communication
+      localStorage.setItem('timesheetRefreshTrigger', Date.now().toString());
+      
+      toast({
+        title: "Clocked Out Successfully",
+        description: `${totalHours.toFixed(2)} hours saved to timesheet${comment ? ' with comment' : ''}. Timesheet will refresh automatically.`,
+        duration: 5000,
+      });
+      
+      loadTimeEntries();
     } catch (error: any) {
       toast({
         title: "Error",
@@ -479,24 +447,14 @@ const TimeClock = () => {
 
     setLoading(true);
     try {
-      const pauseTime = new Date();
-
-      const { error } = await supabase
-        .from("time_clock")
-        .update({
-          pause_start: pauseTime.toISOString(),
-          pause_reason: pauseReason.trim(),
-          status: "paused",
-        })
-        .eq("id", currentEntry.id);
-
-      if (error) throw error;
+      const response = await api.timesheets.pause({ reason: pauseReason.trim() }) as any;
+      const entry = response?.entry;
 
       setCurrentEntry({
         ...currentEntry,
-        pause_start: pauseTime.toISOString(),
-        pause_reason: pauseReason.trim(),
-        status: "paused",
+        pause_start: entry.pause_start,
+        pause_reason: entry.pause_reason,
+        status: entry.status,
       });
 
       toast({
@@ -505,7 +463,7 @@ const TimeClock = () => {
       });
       setShowPauseDialog(false);
       setPauseReason("");
-      loadTimeEntries(user.id);
+      loadTimeEntries();
     } catch (error: any) {
       toast({
         title: "Error",
@@ -522,36 +480,22 @@ const TimeClock = () => {
 
     setLoading(true);
     try {
-      const resumeTime = new Date();
-      const pauseStartTime = new Date(currentEntry.pause_start);
-      
-      // Calculate paused duration in hours
-      const pauseDuration = (resumeTime.getTime() - pauseStartTime.getTime()) / (1000 * 60 * 60);
-      const totalPausedDuration = (currentEntry.paused_duration || 0) + pauseDuration;
-
-      const { error } = await supabase
-        .from("time_clock")
-        .update({
-          pause_start: null,
-          paused_duration: parseFloat(totalPausedDuration.toFixed(2)),
-          status: "clocked_in",
-        })
-        .eq("id", currentEntry.id);
-
-      if (error) throw error;
+      const response = await api.timesheets.resume() as any;
+      const entry = response?.entry;
 
       setCurrentEntry({
         ...currentEntry,
-        pause_start: null,
-        paused_duration: parseFloat(totalPausedDuration.toFixed(2)),
-        status: "clocked_in",
+        pause_start: entry.pause_start,
+        pause_reason: entry.pause_reason,
+        paused_duration: entry.paused_duration,
+        status: entry.status,
       });
 
       toast({
         title: "Work Resumed",
         description: "Timer has been resumed",
       });
-      loadTimeEntries(user.id);
+      loadTimeEntries();
     } catch (error: any) {
       toast({
         title: "Error",
@@ -563,91 +507,17 @@ const TimeClock = () => {
     }
   };
 
-  const addToTimesheet = async (clockInTime: Date, hours: number) => {
-    if (!user || !currentEntry) {
-      if (process.env.NODE_ENV === 'development') {
-        console.warn("Cannot add to timesheet: missing user or currentEntry");
-      }
-      return;
-    }
 
-    try {
-      // Calculate week start once (optimized)
-      const weekStart = startOfWeek(clockInTime, { weekStartsOn: 1 });
-      const weekStartStr = format(weekStart, "yyyy-MM-dd");
-
-      // Determine which day of the week (optimized: use const lookup)
-      const dayOfWeek = clockInTime.getDay();
-      const dayMap: Readonly<Record<number, string>> = {
-        1: "mon_hours",
-        2: "tue_hours",
-        3: "wed_hours",
-        4: "thu_hours",
-        5: "fri_hours",
-        6: "sat_hours",
-        0: "sun_hours",
-      } as const;
-      
-      const dayColumn = dayMap[dayOfWeek];
-      if (!dayColumn) {
-        throw new Error(`Invalid day of week: ${dayOfWeek}`);
-      }
-
-      // Get issue details once (optimized)
-      const issueTitle = currentEntry.issue?.title || "Time Clock Entry";
-      const projectName = currentEntry.project_name || "Project";
-      const hoursRounded = parseFloat(hours.toFixed(2));
-
-      // Parallel execution: get/create timesheet and prepare entry data
-      const { data: timesheetId, error: timesheetError } = await supabase.rpc(
-        'get_or_create_timesheet',
-        {
-          p_user_id: user.id,
-          p_week_start: weekStartStr
-        }
-      );
-
-      if (timesheetError) {
-        if (process.env.NODE_ENV === 'development') {
-          console.error("Error getting/creating timesheet:", timesheetError);
-        }
-        throw timesheetError;
-      }
-
-      if (!timesheetId) {
-        throw new Error("Failed to get or create timesheet");
-      }
-
-      // Single atomic operation: add/update entry
-      const { data: entryId, error: entryError } = await supabase.rpc(
-        'add_timesheet_entry',
-        {
-          p_timesheet_id: timesheetId,
-          p_project: projectName,
-          p_task: issueTitle,
-          p_day_column: dayColumn,
-          p_hours: hoursRounded,
-          p_source: 'time_clock'
-        }
-      );
-
-      if (entryError) {
-        if (process.env.NODE_ENV === 'development') {
-          console.error("Error adding to timesheet:", entryError);
-        }
-        throw entryError;
-      }
-
-      if (process.env.NODE_ENV === 'development') {
-        console.log(`✅ Timesheet updated: ${hoursRounded}h added to ${dayColumn}`);
-      }
-    } catch (error: any) {
-      if (process.env.NODE_ENV === 'development') {
-        console.error("Error in addToTimesheet:", error);
-      }
-      throw error; // Re-throw so clock out can handle it
-    }
-  };
+  if (initializing) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background p-4 md:p-8">
@@ -839,7 +709,7 @@ const TimeClock = () => {
                       </p>
                       {entry.paused_duration && entry.paused_duration > 0 && (
                         <p className="text-xs text-muted-foreground mt-1">
-                          Paused: {entry.paused_duration.toFixed(2)}h
+                          Paused: {Number(entry.paused_duration).toFixed(2)}h
                         </p>
                       )}
                       {entry.notes && (
@@ -852,9 +722,9 @@ const TimeClock = () => {
                           Pause Reason: {entry.pause_reason}
                         </p>
                       )}
-                      {entry.latitude && entry.longitude && (
+                      {entry.latitude != null && entry.longitude != null && (
                         <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
-                          📍 {entry.latitude.toFixed(4)}, {entry.longitude.toFixed(4)}
+                          📍 {Number(entry.latitude).toFixed(4)}, {Number(entry.longitude).toFixed(4)}
                         </p>
                       )}
                     </div>
@@ -933,10 +803,9 @@ const TimeClock = () => {
       }}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Add Work Comment</DialogTitle>
+            <DialogTitle>Clock Out</DialogTitle>
             <DialogDescription>
-              Please add a comment about the work you completed on this issue before clocking out.
-              This helps track progress and provides context for your time.
+              Please provide a summary of the work completed or any notes before clocking out.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
@@ -955,18 +824,20 @@ const TimeClock = () => {
             )}
             <div className="space-y-2">
               <Label htmlFor="clockOutComment">
-                Work Summary <span className="text-red-500">*</span>
+                Work Summary / Bloggers <span className="text-red-500">*</span>
               </Label>
               <Textarea
                 id="clockOutComment"
-                placeholder="Describe what you worked on, completed, or any blockers encountered..."
+                placeholder="Describe what you worked on, completed, bloggers summary, or any notes..."
                 value={clockOutComment}
                 onChange={(e) => setClockOutComment(e.target.value)}
-                rows={4}
-                className="min-h-[100px]"
+                rows={5}
+                className="min-h-[120px]"
               />
               <p className="text-xs text-muted-foreground">
-                This comment will be added to the issue and helps track your progress.
+                {currentEntry?.issue 
+                  ? "This comment will be added to the issue and helps track your progress."
+                  : "This summary will be saved with your time entry."}
               </p>
             </div>
           </div>
@@ -985,7 +856,7 @@ const TimeClock = () => {
               disabled={loading || !clockOutComment.trim()}
               variant="destructive"
             >
-              Clock Out & Submit Comment
+              Clock Out & Save Summary
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -1,20 +1,32 @@
 # TechieMaya Timesheet Application
 
-A comprehensive timesheet and time management system built with React, TypeScript, and Supabase. This application provides a complete solution for tracking employee work hours, managing leave requests, monitoring GitHub issues, and generating detailed reports.
+## 🚀 Quick Start
+
+**Easiest way to start the application:**
+
+1. **Double-click `start-dev.ps1`** (or right-click → Run with PowerShell)
+   - This will start both backend and frontend servers automatically
+   - Two PowerShell windows will open (one for backend, one for frontend)
+   - Keep both windows open while using the application
+
+2. **Or manually start:**
+   - Backend: Open PowerShell in `backend` folder → Run `npm start`
+   - Frontend: Open PowerShell in root folder → Run `npm run dev`
+
+**Important:** Both servers must be running for the application to work!
+
+A comprehensive timesheet and time management system built with React, TypeScript, Node.js, and PostgreSQL. This application provides a complete solution for tracking employee work hours, managing leave requests, monitoring GitHub issues, and generating detailed reports.
 
 ## 🚀 Features
 
 ### Core Functionality
 - **Time Tracking** - Record and manage daily work hours with detailed entries
-- **Time Clock** - Simple clock-in/clock-out interface for employees
+- **Time Clock** - Simple clock-in/clock-out interface with location tracking
 - **Timesheet Management** - View, edit, and export timesheets
 - **PDF Export** - Generate professional PDF reports of timesheets
-
-### Advanced Features
+- **Issue Management** - Track and manage GitHub issues with assignments and labels
 - **Leave Calendar** - Request and manage time off, view team availability
-- **GitHub Issues Integration** - Track and manage GitHub issues directly in the app
 - **Notifications System** - Real-time notifications for important events
-- **📧 Email Notifications** - Automatic emails via Resend for issue assignments, comments, and leave requests
 - **User Management** - Admin panel for managing users and roles
 - **Monitoring Dashboard** - Overview of system activity and statistics
 - **Shared Timesheets** - Public view for sharing timesheet data
@@ -35,159 +47,212 @@ A comprehensive timesheet and time management system built with React, TypeScrip
 - **Sonner** - Toast notifications
 
 ### Backend
-- **Supabase** - Backend-as-a-Service
-  - PostgreSQL database
-  - Authentication
-  - Real-time subscriptions
-  - Row Level Security (RLS)
-  - Edge Functions for serverless email notifications
-- **Resend** - Email delivery service (3,000 emails/month free)
+- **Node.js** - Runtime environment
+- **Express.js** - Web framework
+- **PostgreSQL** - Database (erp schema)
+- **JWT** - Authentication tokens
+- **bcrypt** - Password hashing
 
 ## 📦 Installation
 
 ### Prerequisites
 - Node.js (v18 or higher)
 - npm or yarn
-- Supabase account
+- PostgreSQL database (v12 or higher)
+- pgAdmin or PostgreSQL client
 
 ### Setup Instructions
 
 1. **Clone the repository**
 ```bash
-git clone https://github.com/TechieMaya/VCP_Automation.git
-cd VCP_Automation
-git checkout TechieMaya-Timesheet
+git clone <repository-url>
+cd VCP_Automation-TechieMaya-Timesheet
 ```
 
-2. **Install dependencies**
+2. **Install frontend dependencies**
 ```bash
 npm install
 ```
 
-3. **Configure Supabase**
+3. **Install backend dependencies**
+```bash
+cd backend
+npm install
+cd ..
+```
+
+4. **Set up environment variables**
 
 Create a `.env` file in the root directory:
 ```env
-VITE_SUPABASE_URL=your_supabase_url
-VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+VITE_API_URL=http://localhost:3001/api
 ```
 
-4. **Set up the database**
+Create a `backend/.env` file:
+```env
+PORT=3001
+NODE_ENV=production
+POSTGRES_HOST=your_postgres_host
+POSTGRES_PORT=5432
+POSTGRES_USER=your_postgres_user
+POSTGRES_PASSWORD=your_postgres_password
+POSTGRES_DB=your_database_name
+JWT_SECRET=your_jwt_secret_min_32_characters
+CORS_ORIGINS=http://localhost:5173,http://localhost:5174
+```
 
-Run the SQL scripts in the `database/` folder in the following order:
-- `create-notifications-system.sql` - Sets up notifications
-- `add-email-notifications.sql` - Adds email notification support
-- `create-leave-calendar-system.sql` - Creates leave management tables
-- `create-github-issues-system.sql` - Sets up GitHub issues tracking
+5. **Set up the database**
 
-5. **Start the development server**
+Run the SQL migration script in `database/migrate-to-postgresql.sql` in your PostgreSQL database. This will create all necessary tables, functions, and triggers in the `erp` schema.
+
+6. **Start the backend server**
+```bash
+cd backend
+npm start
+```
+
+7. **Start the frontend development server**
 ```bash
 npm run dev
 ```
 
-The application will be available at `http://localhost:5173`
-
-## 📧 Email Notifications Setup (Optional but Recommended)
-
-Set up automatic email notifications for issue assignments, comments, and leave requests using Supabase Edge Functions + Resend.
-
-**Quick Start (5 minutes):**
-1. Create free Resend account at [https://resend.com](https://resend.com)
-2. Get API key from Resend dashboard
-3. Run `database/create-email-notification-system.sql`
-4. Deploy Edge Function: `supabase functions deploy send-notification-email`
-5. Configure secrets in Supabase Dashboard
-
-**📚 Complete Guides:**
-- **Quick Setup**: See `QUICK-START-EMAIL.md` for 5-minute setup
-- **Full Guide**: See `EMAIL-SETUP-GUIDE.md` for detailed instructions
-- **Deployment**: See `DEPLOYMENT-CHECKLIST.md` for production deployment
-
-**Features:**
-- ✅ Email when admin assigns issue to user
-- ✅ Email when admin comments on issue  
-- ✅ Email to admin when user requests leave
-- ✅ Beautiful HTML email templates
-- ✅ 100% FREE (3,000 emails/month)
-- ✅ Production-ready and scalable
+The application will be available at `http://localhost:5173` (or the port shown in the terminal)
 
 ## 🏗️ Project Structure
 
 ```
-timesheet/
+VCP_Automation-TechieMaya-Timesheet/
 ├── src/
 │   ├── components/          # Reusable UI components
-│   │   ├── ui/             # Base UI components (buttons, dialogs, etc.)
+│   │   ├── ui/             # Base UI components
 │   │   ├── AuthGuard.tsx   # Authentication wrapper
-│   │   └── Notifications.tsx
+│   │   ├── Notifications.tsx
+│   │   └── NotificationPopup.tsx
 │   ├── pages/              # Application pages/routes
 │   │   ├── Auth.tsx        # Login/signup page
 │   │   ├── Index.tsx       # Dashboard/home page
 │   │   ├── Timesheet.tsx   # Main timesheet interface
 │   │   ├── TimeClock.tsx   # Clock in/out interface
 │   │   ├── LeaveCalendar.tsx
-│   │   ├── Issues.tsx      # GitHub issues management
+│   │   ├── Issues.tsx      # Issue management
 │   │   ├── IssueDetail.tsx
-│   │   ├── Users.tsx       # User management (admin)
-│   │   ├── Monitoring.tsx  # System monitoring
+│   │   ├── Users.tsx        # User management (admin)
+│   │   ├── Monitoring.tsx   # System monitoring
 │   │   └── SharedTimesheet.tsx
-│   ├── integrations/
-│   │   └── supabase/       # Supabase client configuration
+│   ├── lib/
+│   │   ├── api.ts          # API client
+│   │   ├── logger.ts       # Production-safe logging
+│   │   └── utils.ts        # Utility functions
 │   ├── hooks/              # Custom React hooks
-│   ├── lib/                # Utility functions
 │   ├── App.tsx             # Main app component
 │   └── main.tsx            # Application entry point
-├── database/               # SQL setup scripts
-├── public/                 # Static assets
+├── backend/
+│   ├── routes/             # API route handlers
+│   │   ├── auth.js
+│   │   ├── issues.js
+│   │   ├── timesheets.js
+│   │   ├── users.js
+│   │   ├── notifications.js
+│   │   ├── leave.js
+│   │   └── labels.js
+│   ├── middleware/
+│   │   └── auth.js         # JWT authentication middleware
+│   ├── db/
+│   │   └── connection.js   # PostgreSQL connection pool
+│   └── server.js           # Express server
+├── database/               # SQL migration scripts
 └── package.json
 ```
 
 ## 🎯 Usage
 
 ### For Employees
-1. **Clock In/Out** - Use the Time Clock page for simple time tracking
+1. **Clock In/Out** - Use the Time Clock page for simple time tracking with location
 2. **Add Time Entries** - Go to Timesheet to add detailed work entries
-3. **Request Leave** - Use the Leave Calendar to request time off
-4. **View Notifications** - Check the notification bell for updates
+3. **View Assigned Issues** - See issues assigned to you in Timesheet
+4. **Request Leave** - Use the Leave Calendar to request time off
+5. **View Notifications** - Check the notification bell for updates
 
 ### For Administrators
-1. **Manage Users** - Add, edit, or deactivate user accounts
-2. **Monitor Activity** - View system-wide statistics and activity
-3. **Approve Requests** - Review and approve leave requests
-4. **Generate Reports** - Export timesheets as PDF reports
+1. **Manage Users** - Add, edit, or change user roles in Users page
+2. **Monitor Activity** - View system-wide statistics in Monitoring page
+3. **Manage Issues** - Create, assign, and track issues in Issues page
+4. **Approve Requests** - Review and approve leave requests
+5. **Generate Reports** - Export timesheets as PDF reports
 
 ## 🔒 Authentication & Security
 
-- Email-based authentication via Supabase
-- Row Level Security (RLS) policies for data protection
+- JWT-based authentication
+- Password hashing with bcrypt
 - Role-based access control (Admin/User)
 - Protected routes with authentication guards
+- CORS configuration for secure API access
 
-## 📊 Database Tables
+## 📊 Database Schema
 
-- **profiles** - User profiles and roles
-- **timesheet_entries** - Time tracking records
+All tables are created in the `erp` schema:
+- **users** - User accounts and profiles
+- **user_roles** - User role assignments
+- **timesheets** - Weekly timesheet records
+- **timesheet_entries** - Individual time entries
+- **time_clock** - Clock in/out records
 - **leave_requests** - Leave/vacation requests
-- **github_issues** - GitHub issue tracking
+- **issues** - GitHub issue tracking
+- **issue_assignees** - Issue-user assignments
+- **issue_labels** - Issue labels
+- **issue_comments** - Issue comments
+- **issue_activity** - Issue activity log
+- **labels** - Available labels
 - **notifications** - User notifications
-- **email_notifications** - Email notification queue
 
-## 🚀 Deployment
+## 🚀 Production Deployment
 
 ### Build for production
+
+**Frontend:**
 ```bash
 npm run build
 ```
 
-The built files will be in the `dist/` directory, ready for deployment to any static hosting service (Vercel, Netlify, etc.).
+**Backend:**
+```bash
+cd backend
+npm start
+```
 
-## 🤝 Contributing
+The frontend build files will be in the `dist/` directory, ready for deployment to any static hosting service (Vercel, Netlify, etc.).
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+The backend should be deployed to a Node.js hosting service (Heroku, Railway, AWS, etc.) with PostgreSQL database access.
+
+### Environment Variables
+
+Make sure to set all environment variables in your production environment:
+- Frontend: `VITE_API_URL`
+- Backend: `POSTGRES_*`, `JWT_SECRET`, `PORT`, `NODE_ENV`, `CORS_ORIGINS`
+
+## 🔧 Development
+
+### Running the development server
+
+Frontend:
+```bash
+npm run dev
+```
+
+Backend:
+```bash
+cd backend
+npm run dev  # If you have nodemon installed
+# or
+npm start
+```
+
+### Making a user admin
+
+```bash
+cd backend
+node make-admin.js <email>
+```
 
 ## 📝 License
 
@@ -195,11 +260,10 @@ This project is proprietary software developed by TechieMaya.
 
 ## 👥 Contact
 
-- **Repository**: [https://github.com/TechieMaya/VCP_Automation](https://github.com/TechieMaya/VCP_Automation)
-- **Branch**: TechieMaya-Timesheet
+For issues, questions, or contributions, please contact the development team.
 
 ## 🙏 Acknowledgments
 
-- Built with [Supabase](https://supabase.com)
 - UI components from [Radix UI](https://www.radix-ui.com/)
 - Icons from [Lucide](https://lucide.dev)
+- Built with modern web technologies

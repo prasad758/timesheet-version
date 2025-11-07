@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,67 +31,56 @@ export function Notifications() {
   useEffect(() => {
     loadNotifications();
 
-    // Subscribe to new notifications
-    const subscription = supabase
-      .channel("notifications")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "notifications",
-        },
-        () => {
+    // Poll for new notifications every 30 seconds
+    const interval = setInterval(() => {
           loadNotifications();
-        }
-      )
-      .subscribe();
+    }, 30000);
 
     return () => {
-      subscription.unsubscribe();
+      clearInterval(interval);
     };
   }, []);
 
   const loadNotifications = async () => {
-    const { data: session } = await supabase.auth.getSession();
-    if (!session.session?.user) return;
+    try {
+      const userData = localStorage.getItem('user');
+      if (!userData) return;
 
-    const { data, error } = await supabase
-      .from("notifications")
-      .select("*")
-      .eq("user_id", session.session.user.id)
-      .order("created_at", { ascending: false })
-      .limit(10);
+      const response = await api.notifications.getAll() as any;
+      const data = response.notifications || response || [];
 
-    if (error) {
-      console.error("Error loading notifications:", error);
-      return;
+      // Sort by created_at descending and limit to 10
+      const sortedData = Array.isArray(data)
+        ? data.sort((a: any, b: any) => 
+            new Date(b.created_at || b.createdAt).getTime() - new Date(a.created_at || a.createdAt).getTime()
+          ).slice(0, 10)
+        : [];
+
+      setNotifications(sortedData);
+      setUnreadCount(sortedData.filter((n: any) => !n.read).length);
+    } catch (error) {
+      // Silently fail - don't show error for notifications
+      setNotifications([]);
+      setUnreadCount(0);
     }
-
-    setNotifications(data || []);
-    setUnreadCount(data?.filter((n) => !n.read).length || 0);
   };
 
   const markAsRead = async (notificationId: string) => {
-    await supabase
-      .from("notifications")
-      .update({ read: true })
-      .eq("id", notificationId);
-
+    try {
+      await api.notifications.markRead(notificationId);
     loadNotifications();
+    } catch (error) {
+      // Silently fail
+    }
   };
 
   const markAllAsRead = async () => {
-    const { data: session } = await supabase.auth.getSession();
-    if (!session.session?.user) return;
-
-    await supabase
-      .from("notifications")
-      .update({ read: true })
-      .eq("user_id", session.session.user.id)
-      .eq("read", false);
-
+    try {
+      await api.notifications.markAllRead();
     loadNotifications();
+    } catch (error) {
+      // Silently fail
+    }
   };
 
   const handleNotificationClick = (notification: Notification) => {

@@ -1,13 +1,12 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { toast as sonnerToast } from "sonner";
 import { AlertCircle, ArrowLeft, CheckCircle2, Clock, MessageSquare, Tag, User, X } from "lucide-react";
 import logo from "/techiemaya-logo.png";
 
@@ -55,7 +54,6 @@ export default function IssueDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [currentUser, setCurrentUser] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [issue, setIssue] = useState<Issue | null>(null);
@@ -74,101 +72,50 @@ export default function IssueDetail() {
 
   useEffect(() => {
     const initPage = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
+      try {
+        const userData = JSON.parse(localStorage.getItem('user') || '{}');
+        if (!userData.id) {
         navigate("/auth");
         return;
       }
 
-      setCurrentUser(session.user);
-      await checkAdminStatus(session.user.id);
+        const currentUserResp = await api.auth.getMe() as any;
+        setIsAdmin(currentUserResp?.user?.role === 'admin');
       await loadIssueData();
       await loadLabels();
       await loadUsers();
+      } catch (error) {
+        console.error('Error initializing issue detail:', error);
+        navigate("/auth");
+      } finally {
       setLoading(false);
+      }
     };
 
     initPage();
 
-    // Subscribe to real-time comment updates
-    const commentSubscription = supabase
-      .channel(`issue-comments-${id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "issue_comments",
-          filter: `issue_id=eq.${id}`,
-        },
-        async (payload) => {
-          // Get current user to check if comment is from them
-          const { data: { session } } = await supabase.auth.getSession();
-          const currentUserId = session?.user?.id;
-          
-          // Show toast notification for new comments (if not from current user)
-          if (payload.new && payload.new.user_id !== currentUserId) {
-            // Get commenter email
-            const { data: userData } = await supabase.rpc("get_all_users_with_roles");
-            const commenter = userData?.find((u: any) => u.user_id === payload.new.user_id);
-            const commenterEmail = commenter?.email || "Someone";
-            
-            sonnerToast.info("New Comment", {
-              description: `${commenterEmail} commented on this issue`,
-              duration: 5000,
-              action: {
-                label: "View",
-                onClick: () => {
-                  // Scroll to comments section
-                  setTimeout(() => {
-                    const commentsSection = document.getElementById("comments-section");
-                    if (commentsSection) {
-                      commentsSection.scrollIntoView({ behavior: "smooth", block: "start" });
-                    }
-                  }, 100);
-                },
-              },
-            });
-          }
-          
-          // Reload comments when new comment is added
-          loadIssueData();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      commentSubscription.unsubscribe();
-    };
+    // Note: Real-time subscriptions removed - would need to be re-implemented with WebSockets or polling
+    // For now, comments will be loaded on page load and after adding new comments
   }, [id, navigate]);
 
-  const checkAdminStatus = async (userId: string) => {
-    const { data } = await supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", userId)
-      .maybeSingle();
-
-    setIsAdmin(data?.role === "admin");
-  };
-
   const loadIssueData = async () => {
-    // Load issue
-    const { data: issueData, error: issueError } = await supabase
-      .from("issues")
-      .select("*")
-      .eq("id", id)
-      .single();
-
-    if (issueError) {
-      toast({
-        title: "Error",
-        description: "Failed to load issue",
-        variant: "destructive",
-      });
+    try {
+      if (!id) {
       navigate("/issues");
       return;
     }
+
+      console.log('Loading issue with ID:', id);
+
+      // Load issue
+      const issueResponse = await api.issues.getById(id) as any;
+      const issueData = issueResponse.issue || issueResponse;
+
+      if (!issueData || !issueData.id) {
+        throw new Error("Issue not found");
+      }
+
+      console.log('Issue data loaded:', issueData);
 
     setIssue(issueData);
     setEditTitle(issueData.title);
@@ -176,397 +123,227 @@ export default function IssueDetail() {
     setEditProjectName(issueData.project_name || "");
 
     // Load assignees
-    const { data: assigneesData } = await supabase
-      .from("issue_assignees")
-      .select("user_id")
-      .eq("issue_id", id);
-
-    if (assigneesData) {
-      const userEmails = await Promise.all(
-        assigneesData.map(async (a) => {
-          const { data: userData } = await supabase.rpc("get_all_users_with_roles");
-          const user = userData?.find((u: any) => u.user_id === a.user_id);
-          return {
+      const assigneesData = issueData.assignees || [];
+      setAssignees(assigneesData.map((a: any) => ({
             user_id: a.user_id,
-            email: user?.email || 'Unknown'
-          };
-        })
-      );
-      setAssignees(userEmails);
-    }
+        email: a.email || 'Unknown'
+      })));
 
     // Load labels
-    const { data: labelsData } = await supabase
-      .from("issue_labels")
-      .select(`
-        label_id,
-        labels (
-          id,
-          name,
-          color
-        )
-      `)
-      .eq("issue_id", id);
+      const labelsData = issueData.labels || [];
+      setIssueLabels(labelsData);
 
-    if (labelsData) {
-      setIssueLabels(labelsData.map((l: any) => l.labels).filter(Boolean));
-    }
+      // Load comments - API returns comments with user_email
+      const commentsData = issueData.comments || [];
+      setComments(commentsData.map((c: any) => ({
+        ...c,
+        user_email: c.email || c.user_email || 'Unknown'
+      })));
 
-    // Load comments
-    const { data: commentsData } = await supabase
-      .from("issue_comments")
-      .select("*")
-      .eq("issue_id", id)
-      .order("created_at", { ascending: true });
-
-    if (commentsData) {
-      const commentsWithEmails = await Promise.all(
-        commentsData.map(async (comment) => {
-          const { data: userData } = await supabase.rpc("get_all_users_with_roles");
-          const user = userData?.find((u: any) => u.user_id === comment.user_id);
-          return {
-            ...comment,
-            user_email: user?.email || 'Unknown'
-          };
-        })
-      );
-      setComments(commentsWithEmails);
-    }
-
-    // Load activity
-    const { data: activityData } = await supabase
-      .from("issue_activity")
-      .select("*")
-      .eq("issue_id", id)
-      .order("created_at", { ascending: false });
-
-    if (activityData) {
-      const activitiesWithEmails = await Promise.all(
-        activityData.map(async (activity) => {
-          const { data: userData } = await supabase.rpc("get_all_users_with_roles");
-          const user = userData?.find((u: any) => u.user_id === activity.user_id);
-          return {
-            ...activity,
-            user_email: user?.email || 'Unknown'
-          };
-        })
-      );
-      setActivities(activitiesWithEmails);
+      // Load activity - API returns activity (not activities)
+      const activityData = issueData.activity || issueData.activities || [];
+      setActivities(activityData.map((a: any) => ({
+        ...a,
+        user_email: a.email || a.user_email || 'Unknown'
+      })));
+    } catch (error: any) {
+      console.error("Error loading issue:", error);
+      console.error("Error details:", error);
+      
+      // Only redirect if it's a 404 (not found) error
+      if (error.message?.includes('404') || error.message?.includes('not found') || error.message?.includes('Issue not found')) {
+        toast({
+          title: "Error",
+          description: "Issue not found",
+          variant: "destructive",
+        });
+        navigate("/issues");
+      } else {
+        toast({
+          title: "Error",
+          description: error.message || "Failed to load issue. Please check the console for details.",
+          variant: "destructive",
+        });
+        // Don't redirect on other errors - let user try to refresh or check console
+      }
     }
   };
 
   const loadLabels = async () => {
-    const { data } = await supabase
-      .from("labels")
-      .select("*")
-      .order("name");
-
-    if (data) {
-      setAvailableLabels(data);
+    try {
+      const response = await api.labels.getAll() as any;
+      const labelsData = response.labels || response || [];
+      setAvailableLabels(labelsData);
+    } catch (error) {
+      console.error("Error loading labels:", error);
+      setAvailableLabels([]);
     }
   };
 
   const loadUsers = async () => {
-    const { data } = await supabase.rpc("get_all_users_with_roles");
-
-    if (data) {
-      setAvailableUsers(data);
+    try {
+      const response = await api.users.getWithRoles() as any;
+      const usersData = response.users || response || [];
+      setAvailableUsers(usersData.map((u: any) => ({
+        user_id: u.user_id || u.id,
+        email: u.email
+      })));
+    } catch (error) {
+      console.error("Error loading users:", error);
+      setAvailableUsers([]);
     }
   };
 
   const updateIssueStatus = async (newStatus: 'open' | 'in_progress' | 'closed') => {
-    const { error } = await supabase
-      .from("issues")
-      .update({
+    try {
+      await api.issues.update(id!, {
         status: newStatus,
-        updated_at: new Date().toISOString(),
         ...(newStatus === 'closed' ? { closed_at: new Date().toISOString() } : {})
-      })
-      .eq("id", id);
-
-    if (error) {
-      toast({
-        title: "Error",
-        description: "Failed to update status",
-        variant: "destructive",
-      });
-    } else {
-      await supabase.from("issue_activity").insert({
-        issue_id: id,
-        user_id: currentUser?.id,
-        action: 'status_changed',
-        details: { old_status: issue?.status, new_status: newStatus }
       });
 
       toast({
         title: "Success",
         description: `Issue status updated to ${newStatus.replace('_', ' ')}`,
       });
-      loadIssueData();
+      await loadIssueData();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update status",
+        variant: "destructive",
+      });
     }
   };
 
   const saveIssue = async () => {
-    const { error } = await supabase
-      .from("issues")
-      .update({
+    if (!id) return;
+    
+    try {
+      await api.issues.update(id, {
         title: editTitle,
         description: editDescription,
         project_name: editProjectName,
-        updated_at: new Date().toISOString()
-      })
-      .eq("id", id);
-
-    if (error) {
-      toast({
-        title: "Error",
-        description: "Failed to update issue",
-        variant: "destructive",
       });
-    } else {
+
       toast({
         title: "Success",
         description: "Issue updated successfully",
       });
       setIsEditing(false);
-      loadIssueData();
+      await loadIssueData();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update issue",
+        variant: "destructive",
+      });
     }
   };
 
   const addComment = async () => {
     if (!newComment.trim()) return;
 
-    const { error } = await supabase
-      .from("issue_comments")
-      .insert({
-        issue_id: id,
-        user_id: currentUser?.id,
-        comment: newComment
-      });
+    try {
+      await api.issues.addComment(id!, newComment);
 
-    if (error) {
       toast({
-        title: "Error",
-        description: "Failed to add comment",
-        variant: "destructive",
-      });
-    } else {
-      await supabase.from("issue_activity").insert({
-        issue_id: id,
-        user_id: currentUser?.id,
-        action: 'commented',
-        details: { comment: newComment.substring(0, 100) }
-      });
-
-      // If admin is commenting, notify all assigned users AND issue creator
-      if (isAdmin && issue) {
-        // Get all assignees for this issue
-        const { data: assignees } = await supabase
-          .from("issue_assignees")
-          .select("user_id")
-          .eq("issue_id", id);
-
-        // Get admin email
-        let adminEmail = "Admin";
-        try {
-          const { data: session } = await supabase.auth.getSession();
-          if (session?.session?.user?.email) {
-            adminEmail = session.session.user.email;
-          }
-        } catch (e) {
-          console.error("Error getting admin email:", e);
-        }
-
-        // Collect all users to notify (assignees + issue creator)
-        const usersToNotify = new Set<string>();
-        
-        // Add assignees
-        if (assignees && assignees.length > 0) {
-          assignees.forEach((assignee) => {
-            if (assignee.user_id !== currentUser?.id) {
-              usersToNotify.add(assignee.user_id);
-            }
-          });
-        }
-
-        // Add issue creator if not already included and not the admin
-        if (issue.created_by && issue.created_by !== currentUser?.id) {
-          usersToNotify.add(issue.created_by);
-        }
-
-        // Create notifications for all users
-        if (usersToNotify.size > 0) {
-          const notificationPromises = Array.from(usersToNotify).map(async (userId) => {
-            return await supabase
-              .from("notifications")
-              .insert({
-                user_id: userId,
-                title: "New Comment from Admin",
-                message: `${adminEmail} commented on issue #${issue.id}: ${issue.title}. "${newComment.substring(0, 150)}${newComment.length > 150 ? '...' : ''}"`,
-                type: "issue_comment",
-                link: `/issues/${id}`,
-                related_id: id
-              });
-          });
-
-          await Promise.all(notificationPromises);
-        }
-      } else if (!isAdmin && issue) {
-        // If regular user is commenting, notify admin and other assignees
-        const { data: assignees } = await supabase
-          .from("issue_assignees")
-          .select("user_id")
-          .eq("issue_id", id);
-
-        // Get commenter email
-        let commenterEmail = "User";
-        try {
-          const { data: session } = await supabase.auth.getSession();
-          if (session?.session?.user?.email) {
-            commenterEmail = session.session.user.email;
-          }
-        } catch (e) {
-          console.error("Error getting commenter email:", e);
-        }
-
-        // Notify admins about user comments
-        const { data: admins } = await supabase
-          .from("user_roles")
-          .select("user_id")
-          .eq("role", "admin");
-
-        const usersToNotify = new Set<string>();
-        
-        // Add admins
-        if (admins) {
-          admins.forEach((admin) => {
-            if (admin.user_id !== currentUser?.id) {
-              usersToNotify.add(admin.user_id);
-            }
-          });
-        }
-
-        // Add other assignees (except the commenter)
-        if (assignees) {
-          assignees.forEach((assignee) => {
-            if (assignee.user_id !== currentUser?.id) {
-              usersToNotify.add(assignee.user_id);
-            }
-          });
-        }
-
-        if (usersToNotify.size > 0) {
-          const notificationPromises = Array.from(usersToNotify).map(async (userId) => {
-            return await supabase
-              .from("notifications")
-              .insert({
-                user_id: userId,
-                title: "New Comment on Issue",
-                message: `${commenterEmail} commented on issue #${issue.id}: ${issue.title}. "${newComment.substring(0, 150)}${newComment.length > 150 ? '...' : ''}"`,
-                type: "issue_comment",
-                link: `/issues/${id}`,
-                related_id: id
-              });
-          });
-
-          await Promise.all(notificationPromises);
-        }
-      }
-      
-      toast({
-        title: "Comment Added",
-        description: isAdmin ? "Users will be notified of your comment" : "Comment posted successfully",
+        title: "Success",
+        description: "Comment added successfully",
       });
 
       setNewComment("");
-      loadIssueData();
+      await loadIssueData();
+      // Notifications are handled by the backend API
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to add comment",
+        variant: "destructive",
+      });
     }
   };
 
   const addLabel = async (labelId: string) => {
-    const { error } = await supabase
-      .from("issue_labels")
-      .insert({
-        issue_id: id,
-        label_id: labelId
+    if (!id) return;
+    
+    try {
+      await api.issues.addLabel(id, labelId);
+      
+      toast({
+        title: "Success",
+        description: "Label added successfully",
       });
 
-    if (error) {
+      await loadIssueData();
+    } catch (error: any) {
       toast({
         title: "Error",
-        description: "Failed to add label",
+        description: error.message || "Failed to add label",
         variant: "destructive",
       });
-    } else {
-      const label = availableLabels.find(l => l.id === labelId);
-      await supabase.from("issue_activity").insert({
-        issue_id: id,
-        user_id: currentUser?.id,
-        action: 'labeled',
-        details: { label_name: label?.name }
-      });
-      loadIssueData();
     }
   };
 
   const removeLabel = async (labelId: string) => {
-    const { error } = await supabase
-      .from("issue_labels")
-      .delete()
-      .match({ issue_id: id, label_id: labelId });
-
-    if (error) {
+    if (!id) return;
+    
+    try {
+      await api.issues.removeLabel(id, labelId);
+      
+      toast({
+        title: "Success",
+        description: "Label removed successfully",
+      });
+      
+      await loadIssueData();
+    } catch (error: any) {
       toast({
         title: "Error",
-        description: "Failed to remove label",
+        description: error.message || "Failed to remove label",
         variant: "destructive",
       });
-    } else {
-      loadIssueData();
     }
   };
 
   const assignUser = async (userId: string) => {
-    const { error } = await supabase
-      .from("issue_assignees")
-      .insert({
-        issue_id: id,
-        user_id: userId,
-        assigned_by: currentUser?.id
+    if (!id) return;
+    
+    try {
+      await api.issues.assignUser(id, userId);
+      
+      toast({
+        title: "Success",
+        description: "User assigned successfully",
       });
-
-    if (error) {
+      
+      await loadIssueData();
+    } catch (error: any) {
       toast({
         title: "Error",
-        description: "Failed to assign user",
+        description: error.message || "Failed to assign user",
         variant: "destructive",
       });
-    } else {
-      const user = availableUsers.find(u => u.user_id === userId);
-      await supabase.from("issue_activity").insert({
-        issue_id: id,
-        user_id: currentUser?.id,
-        action: 'assigned',
-        details: { assignee_email: user?.email }
-      });
-      loadIssueData();
     }
   };
 
   const unassignUser = async (userId: string) => {
-    const { error } = await supabase
-      .from("issue_assignees")
-      .delete()
-      .match({ issue_id: id, user_id: userId });
-
-    if (error) {
+    if (!id) return;
+    
+    try {
+      await api.issues.unassignUser(id, userId);
+      
+      toast({
+        title: "Success",
+        description: "User unassigned successfully",
+      });
+      
+      await loadIssueData();
+    } catch (error: any) {
       toast({
         title: "Error",
-        description: "Failed to unassign user",
+        description: error.message || "Failed to unassign user",
         variant: "destructive",
       });
-    } else {
-      loadIssueData();
     }
   };
 

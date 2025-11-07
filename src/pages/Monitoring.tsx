@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 import { Clock, MapPin, Pause, RefreshCw, MessageSquare } from "lucide-react";
 import { format } from "date-fns";
@@ -64,137 +64,93 @@ const Monitoring = () => {
   });
   const navigate = useNavigate();
 
-  const checkAdminStatus = useCallback(async (userId: string) => {
+  const checkAdminStatus = useCallback(async () => {
     try {
-      const { data, error } = await supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", userId)
-        .maybeSingle();
-
-      if (error) {
-        setIsAdmin(false);
-        setAdminCheckComplete(true);
-        return;
-      }
-
-      const isAdminUser = data?.role === "admin";
+      const currentUser = await api.auth.getMe() as any;
+      const isAdminUser = currentUser?.user?.role === "admin";
       setIsAdmin(isAdminUser);
       setAdminCheckComplete(true);
       
       if (!isAdminUser) {
-        toast({
-          title: "Access Denied",
-          description: "Admin privileges required.",
-          variant: "destructive",
-        });
-        navigate("/time-clock");
+        console.log('User is not admin');
+        // Don't navigate immediately, let the component render the access denied message
       }
     } catch (error) {
+      console.error('Error checking admin status:', error);
       setIsAdmin(false);
       setAdminCheckComplete(true);
     }
-  }, [navigate]);
+  }, []);
 
   const loadAllActiveEntries = useCallback(async () => {
     setLoading(true);
     try {
-      const { data: usersData, error: usersError } = await supabase.rpc("get_all_users_with_roles");
+      console.log('Loading monitoring data...');
       
-      if (usersError) throw usersError;
+      // Load users and active entries in parallel
+      const [usersResponse, activeResponse] = await Promise.all([
+        api.users.getWithRoles().catch((err) => {
+          console.error('Error loading users:', err);
+          return { users: [] };
+        }),
+        api.timesheets.getActive().catch((err) => {
+          console.error('Error loading active entries:', err);
+          return { entries: [] };
+        })
+      ]) as any[];
 
-      const userMap = new Map(usersData.map((u: any) => [u.user_id, u.email]));
+      console.log('Users response:', usersResponse);
+      console.log('Active entries response:', activeResponse);
 
-      // Get all recent entries from last 24 hours (not just active ones)
+      const usersData = usersResponse?.users || usersResponse || [];
+      const userMap = new Map(usersData.map((u: any) => [u.user_id || u.id, u.email]));
+
+      // Get recent entries (last 24 hours)
       const yesterday = new Date();
       yesterday.setDate(yesterday.getDate() - 1);
       
-      const { data, error } = await supabase
-        .from("time_clock")
-        .select("*, issue:issues(id, title, project_name)")
-        .gte("clock_in", yesterday.toISOString())
-        .order("clock_in", { ascending: false })
-        .limit(50);
+      // Get entries from last 24 hours (admin can see all)
+      const entriesResponse = await api.timesheets.getEntries({
+        start_date: yesterday.toISOString()
+      }).catch((err) => {
+        console.error('Error loading recent entries:', err);
+        return { entries: [] };
+      }) as any;
 
-      if (error) throw error;
+      console.log('Recent entries response:', entriesResponse);
 
-      const entriesWithEmail = data.map((entry: any) => ({
-        ...entry,
-        user_email: userMap.get(entry.user_id) || "Unknown User",
-      }));
-
-      // Fetch clock-out comments for entries that have clocked out and an issue
-      const entriesWithComments = await Promise.all(
-        entriesWithEmail.map(async (entry: TimeEntry) => {
-          // Only fetch comments for clocked-out entries with an issue
-          if (entry.status === "clocked_out" && entry.clock_out && entry.issue?.id) {
-            try {
-              // Get comments created around the clock-out time (within 5 minutes)
-              const clockOutTime = new Date(entry.clock_out);
-              const fiveMinutesBefore = new Date(clockOutTime.getTime() - 5 * 60 * 1000);
-              const fiveMinutesAfter = new Date(clockOutTime.getTime() + 5 * 60 * 1000);
-
-              // First try to get from issue_comments (most reliable)
-              const { data: comments } = await supabase
-                .from("issue_comments")
-                .select("id, comment, created_at, user_id")
-                .eq("issue_id", entry.issue.id)
-                .eq("user_id", entry.user_id)
-                .gte("created_at", fiveMinutesBefore.toISOString())
-                .lte("created_at", fiveMinutesAfter.toISOString())
-                .order("created_at", { ascending: false })
-                .limit(1);
-
-              if (comments && comments.length > 0) {
-                const comment = comments[0];
-                // Get user email for comment
-                const commentUserEmail = userMap.get(comment.user_id) || entry.user_email;
-                return {
-                  ...entry,
-                  clock_out_comment: {
-                    id: comment.id,
-                    comment: comment.comment,
-                    created_at: comment.created_at,
-                    user_email: commentUserEmail,
-                  },
-                };
-              }
-
-              // Fallback: Check issue_activity for work_completed with comment
-              const { data: activities } = await supabase
-                .from("issue_activity")
-                .select("id, details, created_at, user_id")
-                .eq("issue_id", entry.issue.id)
-                .eq("user_id", entry.user_id)
-                .eq("action", "work_completed")
-                .gte("created_at", fiveMinutesBefore.toISOString())
-                .lte("created_at", fiveMinutesAfter.toISOString())
-                .order("created_at", { ascending: false })
-                .limit(1);
-
-              if (activities && activities.length > 0) {
-                const activity = activities[0];
-                const commentText = activity.details?.comment;
-                if (commentText) {
-                  const commentUserEmail = userMap.get(activity.user_id) || entry.user_email;
-                  return {
-                    ...entry,
-                    clock_out_comment: {
-                      id: activity.id,
-                      comment: commentText,
-                      created_at: activity.created_at,
-                      user_email: commentUserEmail,
-                    },
-                  };
-                }
-              }
-            } catch (error) {
-              console.error("Error fetching clock-out comment:", error);
-            }
-          }
-          return entry;
-        })
+      const allEntries = entriesResponse?.entries || [];
+      
+      // Combine active entries with recent entries
+      const activeEntries = activeResponse?.entries || [];
+      const combinedEntries = [...activeEntries, ...allEntries];
+      
+      console.log('Active entries:', activeEntries.length);
+      console.log('Recent entries:', allEntries.length);
+      console.log('Combined entries:', combinedEntries.length);
+      
+      // Remove duplicates and get unique entries
+      const uniqueEntries = Array.from(
+        new Map(combinedEntries.map((e: any) => [e.id, e])).values()
       );
+
+      console.log('Unique entries:', uniqueEntries.length);
+
+      const entriesWithEmail = uniqueEntries.map((entry: any) => ({
+        ...entry,
+        user_email: userMap.get(entry.user_id) || entry.user_email || entry.user_email || "Unknown User",
+        issue: entry.issue_id ? {
+          id: entry.issue_id,
+          title: entry.issue_title,
+          project_name: entry.issue_project
+        } : (entry.issue || null),
+      }));
+      
+      // For now, skip fetching clock-out comments via API (can be added later)
+      // TODO: Add API endpoint for fetching issue comments
+      const entriesWithComments = entriesWithEmail;
+      
+      console.log('Final entries count:', entriesWithComments.length);
       
       setAllEntries(entriesWithComments);
       setEntries(entriesWithComments);
@@ -233,11 +189,17 @@ const Monitoring = () => {
       };
       setSummaryStats(stats);
     } catch (error: any) {
+      console.error('Error loading entries:', error);
+      console.error('Error details:', error.message, error.stack);
       toast({
         title: "Error",
         description: error.message || "Failed to load entries",
         variant: "destructive",
       });
+      // Set empty arrays to prevent crashes
+      setAllEntries([]);
+      setEntries([]);
+      setUsers([]);
     } finally {
       setLoading(false);
     }
@@ -255,18 +217,41 @@ const Monitoring = () => {
 
   useEffect(() => {
     const initMonitoring = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+      try {
+        const userData = JSON.parse(localStorage.getItem('user') || '{}');
+        const token = localStorage.getItem('auth_token');
+        
+        if (!userData.id || !token) {
+          console.log('No user or token, redirecting to auth');
+          navigate("/auth");
+          return;
+        }
       
-      if (session) {
-        await checkAdminStatus(session.user.id);
-        await loadAllActiveEntries();
-      } else {
-        navigate("/auth");
+        console.log('Initializing monitoring for user:', userData.id);
+        await checkAdminStatus();
+      } catch (error: any) {
+        console.error('Error initializing monitoring:', error);
+        console.error('Error stack:', error.stack);
+        // Don't redirect immediately, show error instead
+        toast({
+          title: "Error",
+          description: error.message || "Failed to initialize monitoring",
+          variant: "destructive",
+        });
       }
     };
     
     initMonitoring();
-  }, [checkAdminStatus, loadAllActiveEntries, navigate]);
+  }, [checkAdminStatus, navigate]);
+
+  // Load entries once admin check is complete and user is admin
+  useEffect(() => {
+    if (adminCheckComplete && isAdmin) {
+      console.log('Admin check complete, loading entries...');
+      loadAllActiveEntries();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminCheckComplete, isAdmin]); // Only run when admin status changes
 
   useEffect(() => {
     if (selectedUserId === "all") {
@@ -327,7 +312,8 @@ const Monitoring = () => {
 
   const handleSignOut = async () => {
     try {
-      await supabase.auth.signOut();
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('user');
     } catch (error) {
       console.error("Error signing out:", error);
     } finally {
@@ -337,7 +323,7 @@ const Monitoring = () => {
     }
   };
 
-  if (!adminCheckComplete || loading) {
+  if (!adminCheckComplete || (adminCheckComplete && isAdmin && loading)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
         <div className="text-center">
@@ -349,7 +335,15 @@ const Monitoring = () => {
   }
 
   if (adminCheckComplete && !isAdmin) {
-    return null;
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Access Denied</h1>
+          <p className="text-gray-600 dark:text-gray-300 mb-4">Admin privileges required to access this page.</p>
+          <Button onClick={() => navigate("/time-clock")}>Go to Time Clock</Button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -423,7 +417,7 @@ const Monitoring = () => {
               </div>
               <p className="text-xs text-gray-500 mt-1">
                 {summaryStats.clockedOutEntries > 0 
-                  ? `${summaryStats.clockedOutHours.toFixed(1)}h total`
+                  ? `${Number(summaryStats.clockedOutHours || 0).toFixed(1)}h total`
                   : "No clock outs"
                 }
               </p>
@@ -436,10 +430,10 @@ const Monitoring = () => {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                {summaryStats.totalHours.toFixed(1)}h
+                {Number(summaryStats.totalHours || 0).toFixed(1)}h
               </div>
               <p className="text-xs text-gray-500 mt-1">
-                {summaryStats.totalPausedHours > 0 && `${summaryStats.totalPausedHours.toFixed(1)}h paused`}
+                {summaryStats.totalPausedHours > 0 && `${Number(summaryStats.totalPausedHours || 0).toFixed(1)}h paused`}
               </p>
             </CardContent>
           </Card>
@@ -528,7 +522,7 @@ const Monitoring = () => {
                             <span className="font-medium">{entry.clock_out ? "Total Time:" : "Elapsed Time:"}</span>
                             <span className="text-blue-600 dark:text-blue-400 font-semibold">
                               {entry.clock_out 
-                                ? `${entry.total_hours?.toFixed(2) || '0.00'}h`
+                                ? `${Number(entry.total_hours || 0).toFixed(2)}h`
                                 : getElapsedTime(entry.clock_in, entry.paused_duration || 0)}
                             </span>
                           </div>
@@ -565,7 +559,7 @@ const Monitoring = () => {
                                 <div className="flex items-center gap-2 text-sm mt-1">
                                   <span className="font-medium">Paused Duration:</span>
                                   <span className="text-amber-600 dark:text-amber-400 font-semibold">
-                                    {(entry.paused_duration * 60).toFixed(0)} minutes
+                                    {(Number(entry.paused_duration || 0) * 60).toFixed(0)} minutes
                                   </span>
                                 </div>
                               )}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { NotificationPopup } from "./NotificationPopup";
 
 export const AuthGuard = ({ children }: { children: React.ReactNode }) => {
@@ -8,23 +8,25 @@ export const AuthGuard = ({ children }: { children: React.ReactNode }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) {
+    const checkAuth = async () => {
+      const token = localStorage.getItem('auth_token');
+      
+      if (!token) {
         navigate("/auth");
-      } else {
+        return;
+      }
+
+      try {
+        await api.auth.getMe();
         setLoading(false);
-      }
-    });
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session) {
+      } catch (error) {
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('user');
         navigate("/auth");
       }
-    });
+    };
 
-    return () => subscription.unsubscribe();
+    checkAuth();
   }, [navigate]);
 
   if (loading) {
@@ -42,4 +44,3 @@ export const AuthGuard = ({ children }: { children: React.ReactNode }) => {
     </>
   );
 };
-

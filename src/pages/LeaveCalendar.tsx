@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -45,57 +45,54 @@ export default function LeaveCalendar() {
 
   useEffect(() => {
     const initPage = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
+      try {
+        const userData = JSON.parse(localStorage.getItem('user') || '{}');
+        if (!userData.id) {
         navigate("/auth");
         return;
       }
 
-      setCurrentUser(session.user);
-      await checkAdminStatus(session.user.id);
-      await loadMyLeaveRequests(session.user.id);
+        setCurrentUser(userData);
+        const currentUserResp = await api.auth.getMe() as any;
+        const adminStatus = currentUserResp?.user?.role === 'admin';
+        setIsAdmin(adminStatus);
+        
+        await loadMyLeaveRequests(userData.id);
+        if (adminStatus) {
+          await loadAllLeaveRequests();
+        }
+      } catch (error) {
+        console.error('Error initializing leave calendar:', error);
+        navigate("/auth");
+      } finally {
       setLoading(false);
+      }
     };
 
     initPage();
   }, [navigate]);
 
-  const checkAdminStatus = async (userId: string) => {
-    const { data } = await supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", userId)
-      .maybeSingle();
-
-    const adminStatus = data?.role === "admin";
-    setIsAdmin(adminStatus);
-
-    if (adminStatus) {
-      await loadAllLeaveRequests();
-    }
-  };
-
   const loadMyLeaveRequests = async (userId: string) => {
-    const { data, error } = await supabase
-      .from("leave_requests")
-      .select("*")
-      .eq("user_id", userId)
-      .order("start_date", { ascending: false });
-
-    if (error) {
+    try {
+      const response = await api.leave.getAll() as any;
+      const allRequests = response.leave_requests || response || [];
+      // Filter to only current user's requests
+      const myRequests = allRequests.filter((req: any) => req.user_id === userId);
+      setMyLeaveRequests(myRequests);
+    } catch (error) {
       console.error("Error loading leave requests:", error);
-    } else {
-      setMyLeaveRequests(data || []);
+      setMyLeaveRequests([]);
     }
   };
 
   const loadAllLeaveRequests = async () => {
-    const { data, error } = await supabase.rpc("get_all_leave_requests");
-
-    if (error) {
+    try {
+      const response = await api.leave.getAll() as any;
+      const allRequests = response.leave_requests || response || [];
+      setAllLeaveRequests(allRequests);
+    } catch (error) {
       console.error("Error loading all leave requests:", error);
-    } else {
-      setAllLeaveRequests(data || []);
+      setAllLeaveRequests([]);
     }
   };
 
@@ -120,24 +117,14 @@ export default function LeaveCalendar() {
 
     setLoading(true);
 
-    const { error } = await supabase
-      .from("leave_requests")
-      .insert({
-        user_id: currentUser?.id,
+    try {
+      await api.leave.create({
         start_date: selectedStartDate,
         end_date: selectedEndDate,
         leave_type: leaveType,
         reason: reason || null,
-        status: 'pending'
       });
 
-    if (error) {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to create leave request",
-        variant: "destructive",
-      });
-    } else {
       toast({
         title: "Success",
         description: "Leave request submitted successfully",
@@ -146,32 +133,26 @@ export default function LeaveCalendar() {
       setSelectedStartDate("");
       setSelectedEndDate("");
       setReason("");
-      loadMyLeaveRequests(currentUser?.id);
+      if (currentUser?.id) {
+        await loadMyLeaveRequests(currentUser.id);
     }
-
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to create leave request",
+        variant: "destructive",
+      });
+    } finally {
     setLoading(false);
+    }
   };
 
   const updateLeaveStatus = async (requestId: string, newStatus: 'approved' | 'rejected', adminNotes?: string) => {
     setLoading(true);
 
-    const { error } = await supabase
-      .from("leave_requests")
-      .update({
-        status: newStatus,
-        reviewed_by: currentUser?.id,
-        reviewed_at: new Date().toISOString(),
-        admin_notes: adminNotes || null
-      })
-      .eq("id", requestId);
+    try {
+      await api.leave.updateStatus(requestId, newStatus, adminNotes);
 
-    if (error) {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to update leave request",
-        variant: "destructive",
-      });
-    } else {
       toast({
         title: "Success",
         description: `Leave request ${newStatus}`,
@@ -180,43 +161,30 @@ export default function LeaveCalendar() {
       if (currentUser) {
         await loadMyLeaveRequests(currentUser.id);
       }
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update leave request",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   const deleteLeaveRequest = async (requestId: string) => {
-    if (!confirm("Are you sure you want to delete this leave request?")) {
-      return;
-    }
-
-    setLoading(true);
-
-    const { error } = await supabase
-      .from("leave_requests")
-      .delete()
-      .eq("id", requestId);
-
-    if (error) {
+    // TODO: Add delete endpoint to API
       toast({
-        title: "Error",
-        description: error.message || "Failed to delete leave request",
-        variant: "destructive",
+      title: "Coming Soon",
+      description: "Delete functionality will be available soon",
+      variant: "default",
       });
-    } else {
-      toast({
-        title: "Success",
-        description: "Leave request deleted",
-      });
-      loadMyLeaveRequests(currentUser?.id);
-    }
-
-    setLoading(false);
   };
 
   const handleSignOut = async () => {
     try {
-      await supabase.auth.signOut();
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('user');
     } catch (error) {
       // Ignore errors
     } finally {

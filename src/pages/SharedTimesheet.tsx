@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 import { format, addDays } from "date-fns";
 import { Download } from "lucide-react";
@@ -43,16 +43,40 @@ const SharedTimesheet = () => {
     if (!id) return;
 
     try {
-      const { data, error } = await supabase
-        .from("timesheets")
-        .select("week_start, week_end, timesheet_entries(*)")
-        .eq("id", id)
-        .single();
+      // Fetch timesheet by ID directly from API
+      const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+      const response = await fetch(`${API_BASE_URL}/timesheets/${id}`, {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
 
-      if (error) throw error;
-      setTimesheet(data);
+      if (!response.ok) {
+        throw new Error('Failed to load timesheet');
+      }
+
+      const timesheetData = await response.json();
+      const timesheet = timesheetData.timesheet || timesheetData;
+      const entries = timesheet.entries || [];
+      
+      setTimesheet({
+        week_start: timesheet.week_start,
+        week_end: timesheet.week_end || timesheet.week_start,
+        timesheet_entries: entries.map((entry: any) => ({
+          id: entry.id || `entry-${Date.now()}`,
+          project: entry.project || '',
+          task: entry.task || '',
+          mon_hours: Number(entry.mon_hours) || 0,
+          tue_hours: Number(entry.tue_hours) || 0,
+          wed_hours: Number(entry.wed_hours) || 0,
+          thu_hours: Number(entry.thu_hours) || 0,
+          fri_hours: Number(entry.fri_hours) || 0,
+          sat_hours: Number(entry.sat_hours) || 0,
+          sun_hours: Number(entry.sun_hours) || 0,
+        })),
+      });
     } catch (error) {
-      console.error("Error loading shared timesheet:", error);
+      // Silently fail
     } finally {
       setLoading(false);
     }

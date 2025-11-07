@@ -1,10 +1,9 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 import { Users as UsersIcon, LogOut, Shield, User as UserIcon, RefreshCw } from "lucide-react";
-import { User } from "@supabase/supabase-js";
 const logo = "/techiemaya-logo.png";
 
 interface UserProfile {
@@ -15,70 +14,44 @@ interface UserProfile {
 }
 
 const Users = () => {
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<any>(null);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        setCurrentUser(session.user);
-        checkAdminStatus(session.user.id);
-        loadUsers();
+    const initUsers = async () => {
+      try {
+        const userData = JSON.parse(localStorage.getItem('user') || '{}');
+        if (userData.id) {
+          setCurrentUser(userData);
+          const currentUserResp = await api.auth.getMe() as any;
+          setIsAdmin(currentUserResp?.user?.role === 'admin');
+          await loadUsers();
       }
-    });
+      } catch (error) {
+        console.error('Error initializing users:', error);
+      }
+    };
+    initUsers();
   }, []);
-
-  const checkAdminStatus = async (userId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", userId)
-        .maybeSingle();
-
-      if (error) {
-        console.error("Error checking admin status:", error);
-        setIsAdmin(false);
-        return;
-      }
-
-      setIsAdmin(data?.role === "admin");
-    } catch (err) {
-      console.error("Error in checkAdminStatus:", err);
-      setIsAdmin(false);
-    }
-  };
 
   const loadUsers = async () => {
     setLoading(true);
     try {
-      console.log("Loading users...");
-      
-      // Call the database function to get users with their emails
-      const { data, error } = await supabase
-        .rpc("get_all_users_with_roles");
+      const response = await api.users.getWithRoles() as any;
+      const usersData = response.users || response || [];
 
-      if (error) {
-        console.error("Error loading users:", error);
-        throw error;
-      }
-
-      console.log("Users data from function:", data);
-
-      if (data && data.length > 0) {
-        const userProfiles = data.map((user: any) => ({
-          id: user.user_id,
+      if (usersData.length > 0) {
+        const userProfiles = usersData.map((user: any) => ({
+          id: user.user_id || user.id,
           email: user.email,
-          role: user.role,
+          role: user.role || 'user',
           created_at: user.created_at,
         }));
         
-        console.log("User profiles:", userProfiles);
         setUsers(userProfiles);
       } else {
-        console.log("No users found");
         setUsers([]);
       }
     } catch (error: any) {
@@ -121,19 +94,7 @@ const Users = () => {
     try {
       const newRole = currentRole === "admin" ? "user" : "admin";
       
-      const { error } = await supabase
-        .from("user_roles")
-        .upsert(
-          {
-            user_id: userId,
-            role: newRole,
-          },
-          {
-            onConflict: 'user_id'  // Specify which column to use for conflict resolution
-          }
-        );
-
-      if (error) throw error;
+      await api.users.updateRole(userId, newRole);
 
       toast({
         title: "Role Updated",
@@ -153,7 +114,9 @@ const Users = () => {
 
   const handleSignOut = async () => {
     try {
-      await supabase.auth.signOut();
+      // Clear local storage and session storage
+      localStorage.clear();
+      sessionStorage.clear();
     } catch (error) {
       console.error("Sign out error (ignoring):", error);
     } finally {
