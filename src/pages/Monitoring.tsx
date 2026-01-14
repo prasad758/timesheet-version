@@ -8,7 +8,7 @@ import { Clock, MapPin, Pause, RefreshCw, MessageSquare } from "lucide-react";
 import { format } from "date-fns";
 import { Notifications } from "@/components/Notifications";
 
-const logo = "/techiemaya-logo.png";
+
 
 interface Issue {
   id: number;
@@ -310,19 +310,6 @@ const Monitoring = () => {
     }
   }, [selectedUserId, allEntries]);
 
-  const handleSignOut = async () => {
-    try {
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('user');
-    } catch (error) {
-      console.error("Error signing out:", error);
-    } finally {
-      localStorage.clear();
-      sessionStorage.clear();
-      window.location.replace("/auth");
-    }
-  };
-
   if (!adminCheckComplete || (adminCheckComplete && isAdmin && loading)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
@@ -350,34 +337,13 @@ const Monitoring = () => {
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <div className="max-w-7xl mx-auto p-6">
         <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-4">
-            <img src={logo} alt="TechieMaya" className="h-40" />
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">User Monitoring</h1>
-          </div>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">User Monitoring</h1>
           <div className="flex gap-2">
-            <Button onClick={() => navigate("/")} variant="outline">
-              Timesheet
-            </Button>
-            <Button onClick={() => navigate("/time-clock")} variant="outline">
-              Time Clock
-            </Button>
-            <Button onClick={() => navigate("/leave-calendar")} variant="outline">
-              Leave Calendar
-            </Button>
-            <Button onClick={() => navigate("/issues")} variant="outline">
-              Issues
-            </Button>
-            <Button onClick={() => navigate("/users")} variant="outline">
-              Users
-            </Button>
             <Button onClick={loadAllActiveEntries} variant="outline">
               <RefreshCw className="h-4 w-4 mr-2" />
               Refresh
             </Button>
             <Notifications />
-            <Button onClick={handleSignOut} variant="outline">
-              Sign Out
-            </Button>
           </div>
         </div>
 

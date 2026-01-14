@@ -1,67 +1,87 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { api } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
-// import logo from "@/assets/techiemaya-logo.png";
 const logo = "/techiemaya-logo.png";
 
 const Auth = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [isSignUp, setIsSignUp] = useState(false);
-  const [showForgotPassword, setShowForgotPassword] = useState(false);
-  const [resetToken, setResetToken] = useState("");
+  const [magicLinkSent, setMagicLinkSent] = useState(false);
+  const [magicLinkUrl, setMagicLinkUrl] = useState("");
 
   useEffect(() => {
     const token = localStorage.getItem('auth_token');
     if (token) {
-        navigate("/");
-      }
-  }, [navigate]);
+      navigate("/");
+      return;
+    }
 
-  const handleAuth = async (e: React.FormEvent) => {
+    // Check if there's a magic link token in URL
+    const magicToken = searchParams.get('token');
+    if (magicToken) {
+      verifyMagicLink(magicToken);
+    }
+  }, [navigate, searchParams]);
+
+  const verifyMagicLink = async (token: string) => {
+    setLoading(true);
+    try {
+      const response = await api.auth.verifyMagicLink(token);
+      
+      // Save token and user data
+      localStorage.setItem('auth_token', response.token);
+      localStorage.setItem('user', JSON.stringify(response.user));
+      
+      toast({
+        title: "Success",
+        description: "Login successful! Welcome back.",
+      });
+      
+      navigate("/");
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Invalid or expired magic link",
+        variant: "destructive",
+      });
+      // Clear the token from URL on error
+      navigate("/auth", { replace: true });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSendMagicLink = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
     try {
-      if (isSignUp) {
-        const response = await api.auth.register({
-          email,
-          password,
-          full_name: email.split('@')[0], // Use email prefix as name
-        });
-        
-        // Save token
-        localStorage.setItem('auth_token', response.token);
-        localStorage.setItem('user', JSON.stringify(response.user));
-        
+      const response = await api.auth.sendMagicLink(email.trim().toLowerCase());
+      
+      setMagicLinkSent(true);
+      
+      if (response.emailSent) {
         toast({
-          title: "Success",
-          description: "Account created successfully",
+          title: "Magic Link Sent! ✉️",
+          description: "Check your email inbox for the secure login link. It expires in 15 minutes.",
         });
-        navigate("/");
       } else {
-        // Trim email before sending
-        const response = await api.auth.login({
-          email: email.trim().toLowerCase(),
-          password,
+        // Fallback for development when email service is not configured
+        setMagicLinkUrl(response.frontendUrl || response.magicLink);
+        toast({
+          title: "Magic Link Generated! 🔗",
+          description: response.note || "Email service unavailable. Use the test link below.",
         });
-        
-        // Save token
-        localStorage.setItem('auth_token', response.token);
-        localStorage.setItem('user', JSON.stringify(response.user));
-        
-        navigate("/");
       }
+      
     } catch (error: any) {
-      let errorMessage = error.message || "Authentication failed";
+      let errorMessage = error.message || "Failed to send magic link";
       
       // Provide helpful message for connection errors
       if (errorMessage.includes('Failed to fetch') || errorMessage.includes('ERR_CONNECTION_REFUSED') || errorMessage.includes('Cannot connect to server')) {
@@ -72,88 +92,46 @@ const Auth = () => {
         title: "Error",
         description: errorMessage,
         variant: "destructive",
-        duration: 10000, // Show longer for connection errors
+        duration: 10000,
       });
     } finally {
       setLoading(false);
     }
   };
 
-  const handleForgotPassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-
-    try {
-      const response = await api.auth.forgotPassword(email.trim().toLowerCase()) as any;
-      // In development, the token is returned - use it directly
-      if (response.resetToken) {
-        setResetToken(response.resetToken);
-        toast({
-          title: "Success",
-          description: "Please enter your new password below.",
-        });
-      } else {
-        toast({
-          title: "Success",
-          description: "Password reset link sent to your email. Please check your inbox.",
-        });
-        setShowForgotPassword(false);
-        setEmail("");
+  const handleMagicLinkClick = () => {
+    if (magicLinkUrl) {
+      // Extract token from URL and verify
+      const url = new URL(magicLinkUrl);
+      const token = url.searchParams.get('token');
+      if (token) {
+        verifyMagicLink(token);
       }
-    } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to send reset email",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
     }
   };
 
-  const handleResetPassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (newPassword !== confirmPassword) {
-      toast({
-        title: "Error",
-        description: "Passwords do not match",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (newPassword.length < 6) {
-      toast({
-        title: "Error",
-        description: "Password must be at least 6 characters",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setLoading(true);
-
-    try {
-      await api.auth.resetPassword(resetToken, newPassword);
-      toast({
-        title: "Success",
-        description: "Password reset successfully. Please login with your new password.",
-      });
-      setShowForgotPassword(false);
-      setResetToken("");
-      setNewPassword("");
-      setConfirmPassword("");
-    } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to reset password",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
+  // If verifying magic link, show loading state
+  if (searchParams.get('token')) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+        <Card className="w-full max-w-md">
+          <CardHeader className="text-center">
+            <div className="flex justify-center mb-1">
+              <img src={logo} alt="TechieMaya Logo" className="h-52 w-auto" />
+            </div>
+            <CardTitle className="text-2xl">Verifying Magic Link</CardTitle>
+            <CardDescription>Please wait while we log you in...</CardDescription>
+          </CardHeader>
+          <CardContent className="text-center">
+            <div className="flex justify-center items-center space-x-2">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+              <span>Logging in...</span>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
@@ -162,132 +140,103 @@ const Auth = () => {
           <div className="flex justify-center mb-1">
             <img src={logo} alt="TechieMaya Logo" className="h-52 w-auto" />
           </div>
-          <CardTitle className="text-2xl">
-            {isSignUp ? "Create Account" : "Welcome Back"}
-          </CardTitle>
+          <CardTitle className="text-2xl">Welcome to VCP Automation</CardTitle>
           <CardDescription>
-            {showForgotPassword
-              ? "Reset your password"
-              : isSignUp
-              ? "Sign up to create your timesheet"
-              : "Sign in to manage your timesheet"}
+            {magicLinkSent 
+              ? "We've sent you a magic link!" 
+              : "Enter your email to receive a secure login link"}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {showForgotPassword ? (
-            resetToken ? (
-              <form onSubmit={handleResetPassword} className="space-y-4">
-                <div>
-                  <Input
-                    type="password"
-                    placeholder="New Password"
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    required
-                    minLength={6}
-                  />
-                </div>
-                <div>
-                  <Input
-                    type="password"
-                    placeholder="Confirm New Password"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    required
-                    minLength={6}
-                  />
-                </div>
-                <Button type="submit" className="w-full" disabled={loading}>
-                  {loading ? "Resetting..." : "Reset Password"}
-                </Button>
-                <div className="text-center text-sm">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowForgotPassword(false);
-                      setResetToken("");
-                      setNewPassword("");
-                      setConfirmPassword("");
-                    }}
-                    className="text-primary hover:underline"
-                  >
-                    Back to Login
-                  </button>
-                </div>
-              </form>
-            ) : (
-              <form onSubmit={handleForgotPassword} className="space-y-4">
-                <div>
-                  <Input
-                    type="email"
-                    placeholder="Email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                  />
-                </div>
-                <Button type="submit" className="w-full" disabled={loading}>
-                  {loading ? "Sending..." : "Send Reset Link"}
-                </Button>
-                <div className="text-center text-sm">
-                  <button
-                    type="button"
-                    onClick={() => setShowForgotPassword(false)}
-                    className="text-primary hover:underline"
-                  >
-                    Back to Login
-                  </button>
-                </div>
-              </form>
-            )
-          ) : (
-            <>
-          <form onSubmit={handleAuth} className="space-y-4">
-            <div>
-              <Input
-                type="email"
-                placeholder="Email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
-            </div>
-            <div>
-              <Input
-                type="password"
-                placeholder="Password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-            </div>
-                {!isSignUp && (
-                  <div className="text-right text-sm">
-                    <button
-                      type="button"
-                      onClick={() => setShowForgotPassword(true)}
-                      className="text-primary hover:underline"
-                    >
-                      Forgot Password?
-                    </button>
+          {magicLinkSent ? (
+            <div className="space-y-4">
+              {magicLinkUrl ? (
+                // Development mode - email service not configured
+                <div className="text-center">
+                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+                    <p className="text-sm text-yellow-800">
+                      🚧 <strong>Development Mode:</strong> Email service not configured.
+                    </p>
                   </div>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    Use the test link below to access your account:
+                  </p>
+                  <Button 
+                    onClick={handleMagicLinkClick}
+                    className="w-full mb-4"
+                    variant="default"
+                  >
+                    🔗 Use Magic Link
+                  </Button>
+                  <div className="text-xs text-muted-foreground bg-muted p-2 rounded break-all">
+                    <strong>Test Link:</strong> {magicLinkUrl}
+                  </div>
+                </div>
+              ) : (
+                // Production mode - email sent
+                <div className="text-center">
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-6 mb-4">
+                    <div className="text-6xl mb-4">📧</div>
+                    <h3 className="text-lg font-semibold text-green-800 mb-2">
+                      Magic Link Sent!
+                    </h3>
+                    <p className="text-sm text-green-700">
+                      We've sent a secure login link to <strong>{email}</strong>
+                    </p>
+                    <p className="text-xs text-green-600 mt-2">
+                      ⏰ The link expires in 15 minutes for security
+                    </p>
+                  </div>
+                  
+                  <div className="space-y-3 text-sm text-muted-foreground">
+                    <p>📬 Check your email inbox for the login link</p>
+                    <p>🔍 Don't see it? Check your spam/junk folder</p>
+                    <p>📱 The link works on mobile and desktop</p>
+                  </div>
+                </div>
+              )}
+              
+              <div className="text-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMagicLinkSent(false);
+                    setMagicLinkUrl("");
+                    setEmail("");
+                  }}
+                  className="text-primary hover:underline text-sm"
+                >
+                  📧 Send to different email
+                </button>
+              </div>
+            </div>
+          ) : (
+            <form onSubmit={handleSendMagicLink} className="space-y-4">
+              <div>
+                <Input
+                  type="email"
+                  placeholder="Enter your email address"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
+              </div>
+              <Button type="submit" className="w-full" disabled={loading}>
+                {loading ? (
+                  <div className="flex items-center space-x-2">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    <span>Sending Magic Link...</span>
+                  </div>
+                ) : (
+                  "🔗 Send Magic Link"
                 )}
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Loading..." : isSignUp ? "Sign Up" : "Sign In"}
-            </Button>
-          </form>
-          <div className="mt-4 text-center text-sm">
-            <button
-              type="button"
-              onClick={() => setIsSignUp(!isSignUp)}
-              className="text-primary hover:underline"
-            >
-              {isSignUp
-                ? "Already have an account? Sign In"
-                : "Don't have an account? Sign Up"}
-            </button>
-          </div>
-            </>
+              </Button>
+              <div className="text-center text-sm text-muted-foreground">
+                <p>
+                  No account needed! Just enter your registered email address and we'll send you a secure login link.
+                </p>
+              </div>
+            </form>
           )}
         </CardContent>
       </Card>

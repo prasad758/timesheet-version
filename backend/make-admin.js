@@ -3,7 +3,7 @@
  * Run: node make-admin.js
  */
 
-import pool from './db/connection.js';
+import pool from './shared/database/pool.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -39,10 +39,11 @@ async function makeAdmin() {
       [userId]
     );
 
-    // Insert admin role
+    // Insert admin role (using ON CONFLICT to handle duplicates)
     await pool.query(
-      `INSERT INTO erp.user_roles (user_id, role)
-       VALUES ($1, 'admin')`,
+      `INSERT INTO erp.user_roles (id, user_id, role)
+       VALUES (uuid_generate_v4(), $1, 'admin')
+       ON CONFLICT (user_id, role) DO NOTHING`,
       [userId]
     );
 

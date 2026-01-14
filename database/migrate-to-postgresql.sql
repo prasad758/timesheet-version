@@ -195,7 +195,8 @@ CREATE TABLE IF NOT EXISTS erp.leave_requests (
   user_id UUID NOT NULL REFERENCES erp.users(id) ON DELETE CASCADE,
   start_date DATE NOT NULL,
   end_date DATE NOT NULL,
-  leave_type TEXT NOT NULL CHECK (leave_type IN ('pto', 'sick', 'vacation', 'personal', 'unpaid')),
+  leave_type TEXT NOT NULL CHECK (leave_type IN ('Casual Leave', 'Privilege Leave', 'Sick Leave', 'Unpaid Leave', 'Compensatory Off')),
+  session TEXT DEFAULT 'Full Day' CHECK (session IN ('Full Day', 'First Half', 'Second Half')),
   reason TEXT,
   status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
   requested_at TIMESTAMPTZ DEFAULT now(),
@@ -205,6 +206,52 @@ CREATE TABLE IF NOT EXISTS erp.leave_requests (
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now(),
   CONSTRAINT valid_date_range CHECK (end_date >= start_date)
+);
+
+-- Leave balances table
+CREATE TABLE IF NOT EXISTS erp.leave_balances (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES erp.users(id) ON DELETE CASCADE,
+  leave_type TEXT NOT NULL CHECK (leave_type IN ('Casual Leave', 'Privilege Leave', 'Sick Leave', 'Unpaid Leave', 'Compensatory Off')),
+  opening_balance NUMERIC(5,2) DEFAULT 0,
+  availed NUMERIC(5,2) DEFAULT 0,
+  balance NUMERIC(5,2) DEFAULT 0,
+  lapse_date DATE,
+  financial_year TEXT NOT NULL, -- e.g., '2024-2025'
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(user_id, leave_type, financial_year)
+);
+
+-- Shift roster table
+CREATE TABLE IF NOT EXISTS erp.shift_roster (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES erp.users(id) ON DELETE CASCADE,
+  date DATE NOT NULL,
+  shift_type TEXT NOT NULL CHECK (shift_type IN ('Morning', 'Evening', 'Night', 'General')),
+  start_time TIME NOT NULL,
+  end_time TIME NOT NULL,
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(user_id, date)
+);
+
+-- Attendance table
+CREATE TABLE IF NOT EXISTS erp.attendance (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES erp.users(id) ON DELETE CASCADE,
+  date DATE NOT NULL,
+  shift_id UUID REFERENCES erp.shift_roster(id),
+  clock_in TIMESTAMPTZ,
+  clock_out TIMESTAMPTZ,
+  total_hours NUMERIC(5,2),
+  status TEXT DEFAULT 'present' CHECK (status IN ('present', 'absent', 'half_day', 'on_leave')),
+  leave_request_id UUID REFERENCES erp.leave_requests(id),
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(user_id, date)
 );
 
 -- =====================================================

@@ -4,15 +4,19 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthGuard } from "./components/AuthGuard";
+import { Layout } from "./components/Layout";
 import Auth from "./pages/Auth";
 import Timesheet from "./pages/Timesheet";
 import SharedTimesheet from "./pages/SharedTimesheet";
 import Issues from "./pages/Issues";
 import IssueDetail from "./pages/IssueDetail";
 import Users from "./pages/Users";
+import Profiles from "./pages/Profiles";
 import TimeClock from "./pages/TimeClock";
 import Monitoring from "./pages/Monitoring";
 import LeaveCalendar from "./pages/LeaveCalendar";
+import Projects from "./pages/Projects";
+import Git from "./pages/Git";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -25,11 +29,24 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/auth" element={<Auth />} />
+          <Route path="/auth/verify" element={<Auth />} />
           <Route
             path="/"
             element={
               <AuthGuard>
-                <Timesheet />
+                <Layout>
+                  <Timesheet />
+                </Layout>
+              </AuthGuard>
+            }
+          />
+          <Route
+            path="/projects"
+            element={
+              <AuthGuard>
+                <Layout>
+                  <Projects />
+                </Layout>
               </AuthGuard>
             }
           />
@@ -37,7 +54,9 @@ const App = () => (
             path="/issues"
             element={
               <AuthGuard>
-                <Issues />
+                <Layout>
+                  <Issues />
+                </Layout>
               </AuthGuard>
             }
           />
@@ -45,7 +64,9 @@ const App = () => (
             path="/issues/:id"
             element={
               <AuthGuard>
-                <IssueDetail />
+                <Layout>
+                  <IssueDetail />
+                </Layout>
               </AuthGuard>
             }
           />
@@ -53,7 +74,19 @@ const App = () => (
             path="/users"
             element={
               <AuthGuard>
-                <Users />
+                <Layout>
+                  <Users />
+                </Layout>
+              </AuthGuard>
+            }
+          />
+          <Route
+            path="/profiles"
+            element={
+              <AuthGuard>
+                <Layout>
+                  <Profiles />
+                </Layout>
               </AuthGuard>
             }
           />
@@ -61,7 +94,9 @@ const App = () => (
             path="/time-clock"
             element={
               <AuthGuard>
-                <TimeClock />
+                <Layout>
+                  <TimeClock />
+                </Layout>
               </AuthGuard>
             }
           />
@@ -69,7 +104,9 @@ const App = () => (
             path="/monitoring"
             element={
               <AuthGuard>
-                <Monitoring />
+                <Layout>
+                  <Monitoring />
+                </Layout>
               </AuthGuard>
             }
           />
@@ -77,7 +114,29 @@ const App = () => (
             path="/leave-calendar"
             element={
               <AuthGuard>
-                <LeaveCalendar />
+                <Layout>
+                  <LeaveCalendar />
+                </Layout>
+              </AuthGuard>
+            }
+          />
+          <Route
+            path="/git"
+            element={
+              <AuthGuard>
+                <Layout>
+                  <Git />
+                </Layout>
+              </AuthGuard>
+            }
+          />
+          <Route
+            path="/profiles/:id"
+            element={
+              <AuthGuard>
+                <Layout>
+                  <Profiles />
+                </Layout>
               </AuthGuard>
             }
           />

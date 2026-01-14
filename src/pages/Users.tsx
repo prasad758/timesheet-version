@@ -3,8 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
-import { Users as UsersIcon, LogOut, Shield, User as UserIcon, RefreshCw } from "lucide-react";
-const logo = "/techiemaya-logo.png";
+import { Users as UsersIcon, Shield, User as UserIcon, RefreshCw } from "lucide-react";
 
 interface UserProfile {
   id: string;
@@ -112,24 +111,6 @@ const Users = () => {
     }
   };
 
-  const handleSignOut = async () => {
-    try {
-      // Clear local storage and session storage
-      localStorage.clear();
-      sessionStorage.clear();
-    } catch (error) {
-      console.error("Sign out error (ignoring):", error);
-    } finally {
-      try {
-        localStorage.clear();
-        sessionStorage.clear();
-      } catch (e) {
-        console.error("Storage clear error:", e);
-      }
-      window.location.replace("/auth");
-    }
-  };
-
   if (!isAdmin) {
     return (
       <div className="min-h-screen bg-background p-4 md:p-8">
@@ -149,32 +130,8 @@ const Users = () => {
   return (
     <div className="min-h-screen bg-background p-4 md:p-8">
       <div className="mx-auto max-w-6xl">
-        <div className="mb-6 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <img src={logo} alt="Logo" className="h-40 w-auto" />
-            <h1 className="text-2xl font-bold">User Management</h1>
-          </div>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => window.location.href = "/"}>
-              Timesheet
-            </Button>
-            <Button variant="outline" onClick={() => window.location.href = "/issues"}>
-              Issues
-            </Button>
-            <Button variant="outline" onClick={() => window.location.href = "/monitoring"}>
-              Monitoring
-            </Button>
-            <Button variant="outline" onClick={() => window.location.href = "/time-clock"}>
-              Time Clock
-            </Button>
-            <Button variant="outline" onClick={() => window.location.href = "/leave-calendar"}>
-              Leave Calendar
-            </Button>
-            <Button variant="outline" onClick={handleSignOut}>
-              <LogOut className="mr-2 h-4 w-4" />
-              Sign Out
-            </Button>
-          </div>
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold">User Management</h1>
         </div>
 
         <Card>
