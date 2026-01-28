@@ -3,6 +3,9 @@
  * Public exports only
  */
 
+// Main Component
+export { default } from './page';
+
 // Services
 export * from './services/leave-calendarService';
 
@@ -11,7 +14,4 @@ export * from './hooks/useleave-calendar';
 
 // Types
 export * from './types';
-
-// Page export
-export { default } from './page';
 

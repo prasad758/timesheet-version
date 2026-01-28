@@ -1,3 +1,20 @@
+// Create a new profile for onboarding
+import { v4 as uuidv4 } from 'uuid';
+import * as joiningFormModel from '../models/joining-form.model.js';
+
+// Create new profile (minimal info, returns new profileId)
+router.post('/create', async (req, res) => {
+	try {
+		const newProfileId = uuidv4();
+		console.log('[REAL UUID ROUTE HIT] Generated profileId:', newProfileId); // Unique debug log
+		// Insert minimal profile row (can be extended to accept initial data)
+		await joiningFormModel.createEmptyProfile(newProfileId);
+		res.json({ success: true, profileId: newProfileId });
+	} catch (error) {
+		console.error('[joining-form] Create profile error:', error);
+		res.status(500).json({ success: false, error: 'Failed to create profile' });
+	}
+});
 /**
  * Joining Form Routes
  * API endpoints for employee onboarding form

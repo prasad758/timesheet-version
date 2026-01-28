@@ -43,6 +43,7 @@ export async function getJoiningFormById(req, res) {
 export async function saveJoiningForm(req, res) {
   try {
     const { id } = req.params;
+    console.log('[joining-form] saveJoiningForm req.body:', JSON.stringify(req.body, null, 2));
     const result = await joiningFormService.saveJoiningForm(id, req.body);
     res.json({ success: true, ...result });
   } catch (error) {

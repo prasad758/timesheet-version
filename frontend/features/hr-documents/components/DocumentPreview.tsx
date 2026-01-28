@@ -1,35 +1,14 @@
-import React, { useMemo } from 'react';
-import { FileText, Eye, User, Building, Mail, Phone, Calendar, MapPin, DollarSign, Briefcase, Download, RefreshCw } from 'lucide-react';
-
-// Lightweight local types to avoid depending on missing type modules
-export interface UploadedTemplate {
-  id?: string;
-  name?: string;
-  type?: 'pdf' | 'html' | 'docx' | string;
-  previewHtml?: string;
-  file?: File | null;
-}
-
-export interface EmployeeData {
-  employee_name?: string;
-  employee_id?: string;
-  designation?: string;
-  department?: string;
-  date_of_joining?: string;
-  date_of_leaving?: string | null;
-  salary?: string | number;
-  address?: string;
-  email?: string;
-  phone?: string;
-  manager_name?: string;
-  company_name?: string;
-}
+import { FileText, Eye, User, Building, Mail, Phone, Calendar, MapPin, DollarSign, Briefcase, Download } from "lucide-react";
+import { UploadedTemplate, EmployeeData } from "../types";
+import { useMemo, useEffect, useState } from "react";
+import { mergeDocxWithData } from "../lib/docxMerge";
+import { Button } from "@/components/ui/button";
 
 interface DocumentPreviewProps {
   template: UploadedTemplate | null;
   employeeData: EmployeeData;
   onDownloadPdf?: () => void;
-  onRefresh?: () => void;
+  onDownloadDocx?: () => void;
 }
 
 const fieldIcons: Record<string, React.ReactNode> = {
@@ -62,56 +41,76 @@ const fieldLabels: Record<string, string> = {
   company_name: "Company Name",
 };
 
-const DocumentPreview: React.FC<DocumentPreviewProps> = ({ template, employeeData, onDownloadPdf, onRefresh }) => {
-  const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&');
+const DocumentPreview = ({ template, employeeData, onDownloadPdf, onDownloadDocx }: DocumentPreviewProps) => {
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [mergedBlobUrl, setMergedBlobUrl] = useState<string | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [isReady, setIsReady] = useState(false);
 
-  const mergedContent = useMemo(() => {
-    if (!template?.previewHtml) return null;
-    let content = template.previewHtml;
+  // Create merged DOCX blob URL for preview
+  useEffect(() => {
+    if (!template?.content || template.type !== 'docx') {
+      setMergedBlobUrl(null);
+      setIsReady(false);
+      return;
+    }
 
-    const fieldMappings: Record<string, { value: string; label: string }> = {
-      employee_name: { value: (employeeData.employee_name || '').toString(), label: fieldLabels.employee_name },
-      employee_id: { value: (employeeData.employee_id || '').toString(), label: fieldLabels.employee_id },
-      designation: { value: (employeeData.designation || '').toString(), label: fieldLabels.designation },
-      department: { value: (employeeData.department || '').toString(), label: fieldLabels.department },
-      date_of_joining: { value: (employeeData.date_of_joining || '').toString(), label: fieldLabels.date_of_joining },
-      date_of_leaving: { value: (employeeData.date_of_leaving || '').toString(), label: fieldLabels.date_of_leaving },
-      salary: { value: (employeeData.salary || '').toString(), label: fieldLabels.salary },
-      address: { value: (employeeData.address || '').toString(), label: fieldLabels.address },
-      email: { value: (employeeData.email || '').toString(), label: fieldLabels.email },
-      phone: { value: (employeeData.phone || '').toString(), label: fieldLabels.phone },
-      manager_name: { value: (employeeData.manager_name || '').toString(), label: fieldLabels.manager_name },
-      company_name: { value: (employeeData.company_name || '').toString(), label: fieldLabels.company_name },
-    };
+    setIsProcessing(true);
+    setIsReady(false);
 
-    Object.entries(fieldMappings).forEach(([key, { value, label }]) => {
-      if (!value) return;
-
-      // Handlebars-style with optional spaces: {{ key }}
-      const hb = new RegExp(`{{\\s*${escapeRegex(key)}\\s*}}`, 'gi');
-      content = content.replace(hb, value);
-
-      // Single-brace variant: {key}
-      const sb = new RegExp(`{\\s*${escapeRegex(key)}\\s*}`, 'gi');
-      content = content.replace(sb, value);
-
-      // Square-bracket label variants like [Employee Name] (case-insensitive)
-      if (label) {
-        const bracket = new RegExp(`\\[\\s*${escapeRegex(label)}\\s*\\]`, 'gi');
-        content = content.replace(bracket, value);
-        const bracketLower = new RegExp(`\\[\\s*${escapeRegex(label.toLowerCase())}\\s*\\]`, 'gi');
-        content = content.replace(bracketLower, value);
+    const timeoutId = setTimeout(async () => {
+      try {
+        const merged = await mergeDocxWithData(template.content, employeeData);
+        const blob = new Blob([merged], {
+          type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        });
+        
+        const url = URL.createObjectURL(blob);
+        setMergedBlobUrl(prev => {
+          if (prev) URL.revokeObjectURL(prev);
+          return url;
+        });
+        setIsReady(true);
+      } catch (error) {
+        console.error('Error creating merged preview:', error);
+        setIsReady(true);
+      } finally {
+        setIsProcessing(false);
       }
-    });
+    }, 300);
 
-    return content;
-  }, [template, employeeData]);
+    return () => clearTimeout(timeoutId);
+  }, [template?.content, template?.type, employeeData]);
+
+  // Handle PDF blob URL
+  useEffect(() => {
+    if (template?.type === 'pdf' && template.file) {
+      const url = URL.createObjectURL(template.file);
+      setPdfUrl(url);
+      return () => URL.revokeObjectURL(url);
+    } else {
+      setPdfUrl(null);
+    }
+  }, [template?.type, template?.file]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (mergedBlobUrl) URL.revokeObjectURL(mergedBlobUrl);
+    };
+  }, []);
 
   const filledFields = useMemo(() => {
-    return Object.entries(employeeData).filter(([_, value]) => Boolean(value) && String(value).trim() !== '');
+    return Object.entries(employeeData).filter(([_, value]) => value && value.trim() !== '');
   }, [employeeData]);
 
-  const DataSummaryPanel: React.FC = () => (
+  const handleDocxDownload = () => {
+    if (onDownloadDocx) {
+      onDownloadDocx();
+    }
+  };
+
+  const DataSummaryPanel = () => (
     <div className="bg-accent/50 border border-border rounded-lg p-4 mb-4">
       <div className="flex items-center gap-2 mb-3">
         <div className="p-1.5 rounded-md bg-primary/10">
@@ -122,6 +121,7 @@ const DocumentPreview: React.FC<DocumentPreviewProps> = ({ template, employeeDat
           {filledFields.length} field{filledFields.length !== 1 ? 's' : ''} filled
         </span>
       </div>
+      
       {filledFields.length === 0 ? (
         <p className="text-sm text-muted-foreground italic">No data entered yet. Fill in the employee form.</p>
       ) : (
@@ -142,7 +142,7 @@ const DocumentPreview: React.FC<DocumentPreviewProps> = ({ template, employeeDat
 
   if (!template) {
     return (
-      <div className="preview-container flex items-center justify-center">
+      <div className="flex items-center justify-center min-h-[400px] border border-dashed border-border rounded-lg">
         <div className="text-center p-8">
           <div className="p-4 rounded-full bg-muted inline-block mb-4">
             <Eye className="h-8 w-8 text-muted-foreground" />
@@ -158,7 +158,7 @@ const DocumentPreview: React.FC<DocumentPreviewProps> = ({ template, employeeDat
 
   if (template.type === 'pdf') {
     return (
-      <div className="preview-container">
+      <div className="border border-border rounded-lg overflow-hidden">
         <div className="bg-card border-b border-border px-4 py-3 flex items-center gap-2">
           <FileText className="h-4 w-4 text-muted-foreground" />
           <span className="text-sm font-medium text-foreground">{template.name}</span>
@@ -166,106 +166,115 @@ const DocumentPreview: React.FC<DocumentPreviewProps> = ({ template, employeeDat
         </div>
         <div className="p-4">
           <DataSummaryPanel />
-          {template.file ? (
+          {pdfUrl && (
             <iframe
-              src={URL.createObjectURL(template.file as Blob)}
+              src={pdfUrl}
               className="w-full h-[500px] rounded-lg"
               title="PDF Preview"
             />
-          ) : template.previewHtml ? (
-            <iframe
-              srcDoc={template.previewHtml}
-              className="w-full h-[500px] rounded-lg"
-              title="PDF Preview"
-            />
-          ) : (
-            <div className="h-[500px] flex items-center justify-center text-gray-400 border rounded">
-              No preview available
-            </div>
           )}
         </div>
       </div>
     );
   }
-  const handleDownload = () => {
-    const html = mergedContent || template.previewHtml || '';
-    const doc = `<!doctype html><meta charset="utf-8">${html}`;
-    const blob = new Blob([doc], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    const safeName = (template.name || 'document').replace(/[^a-z0-9_.-]/gi, '_') + '.html';
-    a.download = safeName;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  };
 
   return (
-    <div className="preview-container">
-      {/* Header with download buttons */}
-      <div className="bg-card border-b border-border px-4 py-3 sticky top-0 z-10">
-        <div className="flex items-center gap-2 mb-2">
-          <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-          <span className="text-sm font-medium text-foreground truncate">{template.name}</span>
-          <span className="text-xs text-muted-foreground flex-shrink-0">Live Preview</span>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={() => onRefresh && onRefresh()}
-            className="text-xs px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-900 hover:bg-gray-50 flex items-center gap-1.5 font-medium shadow-sm whitespace-nowrap"
-            title="Refresh Preview"
-          >
-            <RefreshCw className="h-4 w-4 flex-shrink-0" />
-            <span>Refresh</span>
-          </button>
-          <button
-            onClick={() => onDownloadPdf && onDownloadPdf()}
-            className="text-xs px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-900 hover:bg-gray-50 flex items-center gap-1.5 font-medium shadow-sm whitespace-nowrap"
-            title="Download as PDF"
-          >
-            <Download className="h-4 w-4 flex-shrink-0" />
-            <span>Download PDF</span>
-          </button>
-          <button
-            onClick={handleDownload}
-            className="text-xs px-3 py-1.5 border border-gray-300 rounded bg-white hover:bg-gray-50 flex items-center gap-1.5 shadow-sm whitespace-nowrap"
-            title="Download merged document as HTML"
-          >
-            <Download className="h-4 w-4 flex-shrink-0" />
-            <span>Download HTML</span>
-          </button>
-        </div>
+    <div className="border border-border rounded-lg overflow-hidden">
+      <div className="bg-card border-b border-border px-4 py-3 flex items-center gap-2">
+        <FileText className="h-4 w-4 text-muted-foreground" />
+        <span className="text-sm font-medium text-foreground">{template.name}</span>
+        <span className="text-xs text-muted-foreground ml-auto">
+          {isProcessing ? 'Processing...' : 'Document Ready'}
+        </span>
       </div>
-      {/* Scrollable document preview area */}
-      <div className="bg-gray-200 p-4 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 200px)', minHeight: '500px' }}>
-        <div 
-          className="document-preview-content bg-white mx-auto shadow-lg rounded"
-          style={{
-            fontFamily: "'Times New Roman', Times, serif",
-            fontSize: '12pt',
-            lineHeight: '1.6',
-            color: '#000',
-            padding: '40px 50px',
-            maxWidth: '700px',
-            minHeight: '900px',
-          }}
-        >
-          <style>{`
-            .document-preview-content img { max-width: 100%; height: auto; display: block; }
-            .document-preview-content h1 { font-size: 18pt; font-weight: bold; margin: 0 0 12pt 0; }
-            .document-preview-content h2 { font-size: 16pt; font-weight: bold; margin: 12pt 0 8pt 0; }
-            .document-preview-content h3, .document-preview-content h4 { font-size: 14pt; font-weight: bold; margin: 10pt 0 6pt 0; }
-            .document-preview-content p { margin: 0 0 10pt 0; text-align: justify; }
-            .document-preview-content table { border-collapse: collapse; width: 100%; margin: 10pt 0; }
-            .document-preview-content td, .document-preview-content th { border: 1px solid #000; padding: 6pt 8pt; text-align: left; vertical-align: top; }
-            .document-preview-content th { background: #f5f5f5; font-weight: bold; }
-            .document-preview-content ul, .document-preview-content ol { margin: 6pt 0; padding-left: 24pt; }
-            .document-preview-content li { margin-bottom: 4pt; }
-            .document-preview-content strong, .document-preview-content b { font-weight: bold; }
-          `}</style>
-          <div dangerouslySetInnerHTML={{ __html: mergedContent || '' }} />
+      <div className="p-4">
+        <DataSummaryPanel />
+        
+        <div className="bg-card min-h-[400px] border border-border rounded-lg shadow-sm overflow-hidden">
+          {isProcessing ? (
+            <div className="flex items-center justify-center h-[400px]">
+              <div className="flex flex-col items-center gap-3">
+                <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                <span className="text-sm text-muted-foreground">Processing document...</span>
+              </div>
+            </div>
+          ) : isReady || mergedBlobUrl ? (
+            <div className="flex flex-col h-full">
+              <div className="bg-accent/50 border-b border-border px-4 py-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">
+                      📄 Document with merged data is ready
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Download with all headers, footers, and formatting preserved.
+                    </p>
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleDocxDownload}
+                      disabled={!onDownloadDocx}
+                    >
+                      <Download className="h-4 w-4 mr-2" />
+                      DOCX
+                    </Button>
+                    {onDownloadPdf && (
+                      <Button
+                        size="sm"
+                        onClick={onDownloadPdf}
+                      >
+                        <FileText className="h-4 w-4 mr-2" />
+                        PDF
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+              
+              <div className="flex-1 p-6 flex flex-col items-center justify-center bg-muted/30">
+                <div className="text-center max-w-md">
+                  <div className="p-4 rounded-full bg-primary/10 inline-block mb-4">
+                    <FileText className="h-12 w-12 text-primary" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-foreground mb-2">
+                    {template.name}
+                  </h3>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    Your employee data has been merged into the template. The document preserves all original formatting.
+                  </p>
+                  
+                  {filledFields.length > 0 && (
+                    <div className="bg-background border border-border rounded-lg p-4 text-left">
+                      <p className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wide">
+                        Merged Fields
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {filledFields.map(([key, value]) => (
+                          <span
+                            key={key}
+                            className="inline-flex items-center gap-1 text-xs bg-primary/10 text-primary px-2 py-1 rounded"
+                          >
+                            {fieldIcons[key]}
+                            {fieldLabels[key]}: <span className="font-medium">{value}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  <p className="text-xs text-muted-foreground mt-4">
+                    💡 DOCX preserves perfect formatting. PDF may have minor differences with complex headers/footers.
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center h-[400px]">
+              <div className="text-sm text-muted-foreground">Upload a template to preview</div>
+            </div>
+          )}
         </div>
       </div>
     </div>

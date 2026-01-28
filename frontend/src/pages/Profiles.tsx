@@ -46,7 +46,11 @@ type SortOption = 'name' | 'join_date' | 'experience' | 'department';
 type FilterStatus = 'all' | 'active' | 'onboarding' | 'ex-employee';
 type ViewMode = 'grid' | 'list' | 'kanban';
 
-const Profiles = () => {
+interface ProfilesProps {
+  onlyCurrentUser?: boolean;
+}
+
+const Profiles = ({ onlyCurrentUser = false }: ProfilesProps) => {
   const { id: profileId } = useParams();
   
   // LAD Architecture: Use SDK hooks
@@ -63,6 +67,17 @@ const Profiles = () => {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [selectedProfile, setSelectedProfile] = useState<EmployeeProfile | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
+
+  // If onlyCurrentUser is true, show detail dialog by default
+  useEffect(() => {
+    if (onlyCurrentUser && currentUser && profiles.length > 0) {
+      const userProfile = profiles.find((p) => p.id === currentUser.id || p.email === currentUser.email);
+      if (userProfile) {
+        setSelectedProfile(userProfile);
+        setIsDetailOpen(true);
+      }
+    }
+  }, [onlyCurrentUser, currentUser, profiles]);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('basic');
@@ -443,48 +458,60 @@ const Profiles = () => {
   const filteredAndSortedProfiles = useMemo(() => {
     let filtered = [...profiles];
 
-    // Search filter
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(p => 
-        p.full_name?.toLowerCase().includes(query) ||
-        p.email?.toLowerCase().includes(query) ||
-        p.skills?.some(s => s.toLowerCase().includes(query)) ||
-        p.job_title?.toLowerCase().includes(query) ||
-        p.department?.toLowerCase().includes(query)
-      );
-    }
-
-    // Department filter
-    if (filterDepartment !== "all") {
-      filtered = filtered.filter(p => p.department === filterDepartment);
-    }
-
-    // Role filter
-    if (filterRole !== "all") {
-      filtered = filtered.filter(p => p.role === filterRole);
-    }
-
-    // Status filter (simplified - using role or join_date)
-    if (filterStatus !== "all") {
+    // If onlyCurrentUser, filter to just the current user's profile
+    if (onlyCurrentUser && currentUser) {
+      console.log('🔍 OnlyCurrentUser mode - Current User:', currentUser);
+      console.log('🔍 OnlyCurrentUser mode - All Profiles:', profiles);
       filtered = filtered.filter(p => {
-        if (filterStatus === "active") return p.role !== "ex-employee";
-        if (filterStatus === "onboarding") return !p.join_date || new Date(p.join_date) > new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
-        if (filterStatus === "ex-employee") return p.role === "ex-employee";
-        return true;
+        const match = p.id === currentUser.id || p.email === currentUser.email;
+        console.log(`🔍 Profile ${p.email} (${p.id}) matches current user: ${match}`);
+        return match;
       });
-    }
+      console.log('🔍 OnlyCurrentUser mode - Filtered profiles:', filtered);
+    } else {
+      // Search filter
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        filtered = filtered.filter(p => 
+          p.full_name?.toLowerCase().includes(query) ||
+          p.email?.toLowerCase().includes(query) ||
+          p.skills?.some(s => s.toLowerCase().includes(query)) ||
+          p.job_title?.toLowerCase().includes(query) ||
+          p.department?.toLowerCase().includes(query)
+        );
+      }
 
-    // Experience filter
-    if (filterExperience !== "all") {
-      filtered = filtered.filter(p => {
-        const exp = p.experience_years || 0;
-        if (filterExperience === "0-2") return exp >= 0 && exp < 2;
-        if (filterExperience === "2-5") return exp >= 2 && exp < 5;
-        if (filterExperience === "5-10") return exp >= 5 && exp < 10;
-        if (filterExperience === "10+") return exp >= 10;
-        return true;
-      });
+      // Department filter
+      if (filterDepartment !== "all") {
+        filtered = filtered.filter(p => p.department === filterDepartment);
+      }
+
+      // Role filter
+      if (filterRole !== "all") {
+        filtered = filtered.filter(p => p.role === filterRole);
+      }
+
+      // Status filter (simplified - using role or join_date)
+      if (filterStatus !== "all") {
+        filtered = filtered.filter(p => {
+          if (filterStatus === "active") return p.role !== "ex-employee";
+          if (filterStatus === "onboarding") return !p.join_date || new Date(p.join_date) > new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+          if (filterStatus === "ex-employee") return p.role === "ex-employee";
+          return true;
+        });
+      }
+
+      // Experience filter
+      if (filterExperience !== "all") {
+        filtered = filtered.filter(p => {
+          const exp = p.experience_years || 0;
+          if (filterExperience === "0-2") return exp >= 0 && exp < 2;
+          if (filterExperience === "2-5") return exp >= 2 && exp < 5;
+          if (filterExperience === "5-10") return exp >= 5 && exp < 10;
+          if (filterExperience === "10+") return exp >= 10;
+          return true;
+        });
+      }
     }
 
     // Sort
@@ -510,7 +537,7 @@ const Profiles = () => {
     });
 
     return filtered;
-  }, [profiles, searchQuery, filterDepartment, filterRole, filterStatus, filterExperience, sortBy, sortOrder]);
+  }, [profiles, searchQuery, filterDepartment, filterRole, filterStatus, filterExperience, sortBy, sortOrder, onlyCurrentUser, currentUser]);
 
   const getInitials = (name: string) => {
     if (!name) return "?";
@@ -607,9 +634,16 @@ const Profiles = () => {
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Employee Profiles</h1>
-          <p className="text-gray-500 mt-1">View and manage employee directory and professional history</p>
+          <h1 className="text-3xl font-bold text-gray-900">
+            {onlyCurrentUser ? 'My Profile' : 'Employee Profiles'}
+          </h1>
+          <p className="text-gray-500 mt-1">
+            {onlyCurrentUser 
+              ? 'View and manage your profile details' 
+              : 'View and manage employee directory and professional history'}
+          </p>
         </div>
+        {!onlyCurrentUser && (
         <div className="flex items-center space-x-2">
           {/* View Mode Toggle */}
           <div className="flex items-center border rounded-md overflow-hidden">
@@ -834,10 +868,11 @@ const Profiles = () => {
             Refresh
           </Button>
         </div>
+        )}
       </div>
 
       {/* Global Search Modal (Cmd+K) */}
-      {isSearchOpen && (
+      {!onlyCurrentUser && isSearchOpen && (
         <Dialog open={isSearchOpen} onOpenChange={setIsSearchOpen}>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
@@ -890,6 +925,7 @@ const Profiles = () => {
       )}
 
       {/* Search and Filters */}
+      {!onlyCurrentUser && (
       <Card className="mb-6">
         <CardContent className="p-4">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
@@ -1000,6 +1036,7 @@ const Profiles = () => {
           </div>
         </CardContent>
       </Card>
+      )}
 
       {/* Error Display */}
       {profilesError && (

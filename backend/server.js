@@ -1,27 +1,37 @@
+
+
+import dotenv from 'dotenv';
+dotenv.config();
+import { fileURLToPath } from 'node:url';
+import express from 'express';
+import cors from 'cors';
+import path from 'node:path';
+import fs from 'fs-extra';
+import multer from 'multer';
+
 /**
  * Express Server
  * Main entry point for the API
  * LAD Architecture - Feature-Based Modular Structure
  */
 
-import express from 'express';
-import cors from 'cors';
-import dotenv from 'dotenv';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import multer from 'multer';
-import fs from 'fs-extra';
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load environment variables from configs directory
-const envPath = path.resolve(__dirname, '../configs/.env');
-dotenv.config({ path: envPath });
-// Fallback to backend directory
-if (!process.env.DB_HOST) {
-  dotenv.config({ path: path.resolve(__dirname, '.env') });
-}
+const app = express();
+
+// Define PORT
+const PORT = process.env.PORT || 3001;
+
+
+// Ensure uploads/verification directory exists before serving static files
+const verificationUploadsDir = path.join(process.cwd(), 'backend', 'uploads', 'verification');
+fs.ensureDirSync(verificationUploadsDir);
+// Serve uploaded verification documents
+app.use('/uploads/verification', express.static(verificationUploadsDir));
+
+
+// ...existing code...
 
 // Core modules
 // We'll dynamically import feature route modules below (safer if DB or modules fail on import)
@@ -41,14 +51,10 @@ let leaveCalendarRoutes = null;
 let gitRoutes = null;
 let hrDocumentsRoutes = null;
 let joiningFormRoutes = null;
+let recruitmentRoutes = null;
 
 // Legacy routes (temporary - for notifications and labels)
-import notificationsRoutes from './src/routes/notifications.js';
-import labelsRoutes from './src/routes/labels.js';
-import leaveRoutes from './src/routes/leave.js';
-
-const app = express();
-const PORT = process.env.PORT || 3001;
+// ...existing code...
 
 // Middleware - CORS configuration
 app.use(cors({
@@ -126,6 +132,8 @@ const loadRoutes = async () => {
   hrDocumentsRoutes = await safeImport('./features/hr-documents/routes/hr-documents.routes.js');
   // Joining form feature - employee onboarding
   joiningFormRoutes = await safeImport('./features/joining-form/routes/joining-form.routes.js');
+  // Recruitment feature - 3-stage hiring process
+  recruitmentRoutes = await safeImport('./features/recruitment/routes/index.js');
 
   // Diagnostic: report which route modules loaded
   const loadedRoutes = {
@@ -144,6 +152,7 @@ const loadRoutes = async () => {
     git: Boolean(gitRoutes),
     hrDocuments: Boolean(hrDocumentsRoutes),
     joiningForm: Boolean(joiningFormRoutes),
+    recruitment: Boolean(recruitmentRoutes),
   };
 
   console.log('[route-loader] Feature routes loaded:', Object.entries(loadedRoutes)
@@ -203,6 +212,7 @@ const loadRoutes = async () => {
   if (leaveCalendarRoutes) app.use('/api/leave-calendar', leaveCalendarRoutes);
   if (gitRoutes) app.use('/api/git', gitRoutes);
   if (joiningFormRoutes) app.use('/api/joining-form', joiningFormRoutes);
+  if (recruitmentRoutes) app.use('/api/recruitment', recruitmentRoutes);
   if (hrDocumentsRoutes) app.use('/api/hr-documents', hrDocumentsRoutes);
   else {
     // Fallback: provide minimal /api/hr-documents responses to avoid 404s in the UI
@@ -264,6 +274,9 @@ app.use('/api/auth', (req, res, next) => {
 });
 
 // Legacy routes (temporary - for notifications and labels)
+import notificationsRoutes from './src/routes/notifications.js';
+import labelsRoutes from './src/routes/labels.js';
+import leaveRoutes from './src/routes/leave.js';
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/labels', labelsRoutes);
 app.use('/api/leave', leaveRoutes);

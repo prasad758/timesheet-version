@@ -193,6 +193,38 @@ router.post('/generate/preview', express.json(), async (req, res) => {
   }
 });
 
+// --- Template upload and fetch by type ---
+const templateTypeDir = path.join(process.cwd(), 'backend', 'uploads', 'hr-templates');
+fs.ensureDirSync(templateTypeDir);
+
+const typeStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, templateTypeDir),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `${req.body.templateType}${ext}`);
+  }
+});
+const typeUpload = multer({ storage: typeStorage });
+
+// Upload HR template by type
+router.post('/template/upload', typeUpload.single('template'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ success: false, error: 'No file uploaded' });
+  }
+  res.json({ success: true, filename: req.file.filename });
+});
+
+// Get HR template by type
+router.get('/template/:type', (req, res) => {
+  const type = req.params.type;
+  const files = fs.readdirSync(templateTypeDir);
+  const file = files.find(f => f.startsWith(type));
+  if (!file) {
+    return res.status(404).json({ success: false, error: 'Template not found' });
+  }
+  res.sendFile(path.join(templateTypeDir, file));
+});
+
 router.get('/document-types', (req, res) => {
   res.json({ success: true, documentTypes: [
     { id: 'payslip', name: 'Employee Payslip' },

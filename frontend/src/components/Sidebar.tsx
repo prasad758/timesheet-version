@@ -41,15 +41,19 @@ export function Sidebar({ onLogout }: SidebarProps) {
 
   const menuItems = [
     { icon: Home, label: 'Timesheet', path: '/', adminOnly: false },
-    { icon: FolderKanban, label: 'Projects', path: '/projects', adminOnly: false },
-    { icon: Search, label: 'Issues', path: '/issues', adminOnly: false },
+  ];
+  // Project Management handled separately, then rest of menu
+  const otherMenuItems = [
     { icon: Briefcase, label: 'Resource Management', path: '/resource-management', adminOnly: true },
-    { icon: Users, label: 'Users', path: '/users', adminOnly: true },
+    { icon: Users, label: 'Employees', path: '/users', adminOnly: true },
     { icon: BarChart3, label: 'Monitoring', path: '/monitoring', adminOnly: true },
     { icon: Clock, label: 'Time Clock', path: '/time-clock', adminOnly: false },
     { icon: Calendar, label: 'Leave Calendar', path: '/leave-calendar', adminOnly: false },
     { icon: GitBranch, label: 'Git', path: '/git', adminOnly: false },
   ];
+
+  // Project Management tab (no sub-items)
+  const [projectMgmtOpen, setProjectMgmtOpen] = useState(true);
 
   const handleNavigation = (path: string) => {
     navigate(path);
@@ -95,21 +99,54 @@ export function Sidebar({ onLogout }: SidebarProps) {
 
       {/* Navigation Menu */}
       <nav className="flex-1 p-4 space-y-2">
-        {filteredMenuItems.map((item) => {
+        {/* Timesheet */}
+        {menuItems.map((item) => {
+          const Icon = item.icon;
+          const isActive = location.pathname === item.path;
+          return (
+            <button
+              key={item.path}
+              onClick={() => handleNavigation(item.path)}
+              className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg transition-colors ${
+                isActive
+                  ? 'bg-blue-900 text-white'
+                  : 'text-gray-700 hover:bg-gray-100'
+              } ${isCollapsed ? 'justify-center' : ''}`}
+              title={isCollapsed ? item.label : ''}
+            >
+              <Icon className="h-5 w-5 flex-shrink-0" />
+              {!isCollapsed && <span className="text-sm font-medium">{item.label}</span>}
+            </button>
+          );
+        })}
+        {/* Project Management as second item */}
+        <button
+          onClick={() => handleNavigation('/project-management')}
+          className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg transition-colors ${
+            location.pathname.startsWith('/project-management')
+              ? 'bg-blue-900 text-white'
+              : 'text-gray-700 hover:bg-gray-100'
+          } ${isCollapsed ? 'justify-center' : ''}`}
+          title={isCollapsed ? 'Project Management' : ''}
+        >
+          <FolderKanban className="h-5 w-5 flex-shrink-0" />
+          {!isCollapsed && <span className="text-sm font-medium">Project Management</span>}
+        </button>
+        {/* Other Menu Items */}
+        {otherMenuItems.filter(item => !item.adminOnly || isAdmin).map((item) => {
           const Icon = item.icon;
           const isActive = location.pathname === item.path || 
             (item.path === '/resource-management' && 
-             (location.pathname === '/profiles' || 
-              location.pathname === '/joining-form' ||
-              location.pathname === '/exit-formalities' || 
-              location.pathname === '/payslips' ||
-              location.pathname === '/hr-documents' ||
-              location.pathname.startsWith('/profiles/') ||
-              location.pathname.startsWith('/joining-form/') ||
-              location.pathname.startsWith('/exit-formalities/') ||
-              location.pathname.startsWith('/hr-documents/') ||
-              location.pathname.startsWith('/payslips/')));
-          
+              (location.pathname === '/profiles' || 
+                location.pathname === '/joining-form' ||
+                location.pathname === '/exit-formalities' || 
+                location.pathname === '/payslips' ||
+                location.pathname === '/hr-documents' ||
+                location.pathname.startsWith('/profiles/') ||
+                location.pathname.startsWith('/joining-form/') ||
+                location.pathname.startsWith('/exit-formalities/') ||
+                location.pathname.startsWith('/hr-documents/') ||
+                location.pathname.startsWith('/payslips/')));
           return (
             <button
               key={item.path}
@@ -131,7 +168,10 @@ export function Sidebar({ onLogout }: SidebarProps) {
       {/* User Profile & Logout */}
       <div className="border-t border-gray-200 p-4">
         {!isCollapsed && (
-          <div className="flex items-center space-x-3 mb-3">
+          <button 
+            onClick={() => handleNavigation('/employee')}
+            className="w-full flex items-center space-x-3 mb-3 p-2 rounded-lg hover:bg-gray-100 transition-colors"
+          >
             <div className="w-8 h-8 bg-blue-900 rounded-full flex items-center justify-center">
               <span className="text-white text-sm font-bold">{getUserInitial()}</span>
             </div>
@@ -143,7 +183,19 @@ export function Sidebar({ onLogout }: SidebarProps) {
                 {user?.role || 'employee'}
               </div>
             </div>
-          </div>
+          </button>
+        )}
+        
+        {isCollapsed && (
+          <button 
+            onClick={() => handleNavigation('/employee')}
+            className="w-full flex items-center justify-center p-2 rounded-lg hover:bg-gray-100 transition-colors mb-3"
+            title="Profile"
+          >
+            <div className="w-8 h-8 bg-blue-900 rounded-full flex items-center justify-center">
+              <span className="text-white text-sm font-bold">{getUserInitial()}</span>
+            </div>
+          </button>
         )}
         
         <Button

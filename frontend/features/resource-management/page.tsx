@@ -11,7 +11,7 @@ import Profiles from "../profiles/page";
 import ExitFormalities from "../exit-formalities/page";
 import Payslips from "../payslips/page";
 import HRDocumentsPage from "../hr-documents/page";
-import JoiningFormList from "../joining-form/JoiningFormList";
+import IntegratedJoiningPage from "../joining-form/IntegratedJoiningPage";
 
 const ResourceManagement = () => {
   const location = useLocation();
@@ -21,6 +21,9 @@ const ResourceManagement = () => {
   const getInitialTab = () => {
     if (location.pathname === "/profiles" || location.pathname.startsWith("/profiles/")) {
       return "profiles";
+    }
+    if (location.pathname === "/recruitment" || location.pathname.startsWith("/recruitment/")) {
+      return "joining-form";
     }
     if (location.pathname === "/joining-form" || location.pathname.startsWith("/joining-form/")) {
       return "joining-form";
@@ -106,7 +109,7 @@ const ResourceManagement = () => {
       {/* Tab Content */}
       <div className="flex-1 overflow-auto">
         {activeTab === "profiles" && <Profiles />}
-        {activeTab === "joining-form" && <JoiningFormList />}
+        {activeTab === "joining-form" && <IntegratedJoiningPage />}
         {activeTab === "exit-formalities" && <ExitFormalities />}
         {activeTab === "payslips" && <Payslips />}
         {activeTab === "hr-documents" && <HRDocumentsPage />}

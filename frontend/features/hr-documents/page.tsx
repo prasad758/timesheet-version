@@ -1,605 +1,669 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Download, User, FileText, Trash2 } from 'lucide-react';
-import DocumentPreview, { UploadedTemplate, EmployeeData } from './components/DocumentPreview';
+import { useState, useEffect } from "react";
+import { Download, FileText, Sparkles, User, ChevronDown } from "lucide-react";
+import TemplateUpload from "./components/TemplateUpload";
+import EmployeeDataForm from "./components/EmployeeDataForm";
+import DocumentPreview from "./components/DocumentPreview";
+import { Button } from "@/components/ui/button";
+import { UploadedTemplate, EmployeeData, defaultEmployeeData } from "./types";
+import * as joiningFormService from "../joining-form/services/joiningFormService";
+import { useToast } from "@/hooks/use-toast";
+import { mergeDocxWithData } from "./lib/docxMerge";
+import { api } from "@/lib/api";
+// @ts-ignore
+import { saveAs } from "file-saver";
+// @ts-ignore
+import jsPDF from "jspdf";
+// @ts-ignore
+import html2canvas from "html2canvas";
+// @ts-ignore
+import { renderAsync } from "docx-preview";
+
+// Template categories for quick selection
+const templateCategories = [
+  { id: 'payslip', name: 'Payslip', description: 'Monthly salary slip template' },
+  { id: 'offer_letter', name: 'Offer Letter', description: 'Employment offer letter' },
+  { id: 'experience_letter', name: 'Experience Letter', description: 'Work experience certificate' },
+  { id: 'relieving_letter', name: 'Relieving Letter', description: 'Employment relieving letter' },
+  { id: 'appointment_letter', name: 'Appointment Letter', description: 'Job appointment letter' },
+  { id: 'increment_letter', name: 'Increment Letter', description: 'Salary increment letter' },
+  { id: 'termination_letter', name: 'Termination Letter', description: 'Employment termination letter' },
+];
 
 interface Employee {
   id: string;
-  employee_name?: string;
-  name?: string;
+  email: string;
   full_name?: string;
-  email?: string;
-  personal_email?: string;
+  employee_id?: string;
   designation?: string;
-  job_title?: string;
   department?: string;
   date_of_joining?: string;
-  join_date?: string;
-  date_of_leaving?: string;
   phone?: string;
   address?: string;
   salary?: string;
   manager_name?: string;
-  reporting_manager?: string;
-  company_name?: string;
-  employee_id?: string;
 }
 
-const dummyEmployee: EmployeeData = {
-  employee_name: '',
-  employee_id: '',
-  designation: '',
-  department: '',
-  date_of_joining: '',
-  date_of_leaving: '',
-  salary: '',
-    // date_of_ending removed
-  email: '',
-  phone: '',
-  manager_name: '',
-  company_name: '',
-};
-
-const HRDocumentsPage: React.FC = () => {
-  const API_BASE = (import.meta.env.VITE_API_URL as string) || 'http://localhost:3001/api';
-
-  // Helper function to format date without timezone (YYYY-MM-DD)
-  const formatDate = (dateStr: string | undefined | null): string => {
-    if (!dateStr) return '';
-    try {
-      const date = new Date(dateStr);
-      if (isNaN(date.getTime())) return dateStr;
-      return date.toISOString().split('T')[0]; // Returns YYYY-MM-DD
-    } catch {
-      return dateStr;
-    }
-  };
-
+export default function HRDocumentsPage() {
   const [template, setTemplate] = useState<UploadedTemplate | null>(null);
-  const [templatesList, setTemplatesList] = useState<UploadedTemplate[]>([]);
+  const [uploadedTemplates, setUploadedTemplates] = useState<UploadedTemplate[]>([]);
+  const [employeeData, setEmployeeData] = useState<EmployeeData>(defaultEmployeeData);
+  const [isDownloading, setIsDownloading] = useState(false);
   const [employees, setEmployees] = useState<Employee[]>([]);
-  const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('');
+  const [selectedUploadedTemplateIdx, setSelectedUploadedTemplateIdx] = useState<number | null>(null);
+  const [loadingEmployees, setLoadingEmployees] = useState(false);
+  const { toast } = useToast();
 
-  // Editable employee data (so preview can show actual values)
-  const [employeeData, setEmployeeData] = useState<EmployeeData>({
-    employee_name: '',
-    employee_id: '',
-    designation: '',
-    department: '',
-    date_of_joining: '',
-    date_of_leaving: '',
-    salary: '',
-      // date_of_ending removed
-    email: '',
-    phone: '',
-    manager_name: '',
-    company_name: '',
-  });
-
-  // Fetch employees on mount (with auth token)
+  // Fetch employees on mount
   useEffect(() => {
-    (async () => {
+    const fetchEmployees = async () => {
+      setLoadingEmployees(true);
       try {
-        const token = localStorage.getItem('auth_token');
-        const resp = await fetch(`${API_BASE}/profiles`, {
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token && { Authorization: `Bearer ${token}` }),
-          },
-        });
-        const json = await resp.json();
-        console.log('[HR Documents] Profiles response:', json);
-        const list = json.profiles || json.users || json || [];
-        setEmployees(Array.isArray(list) ? list : []);
-      } catch (e) {
-        console.error('Failed to load employees', e);
-      }
-    })();
-  }, [API_BASE]);
-
-  // Fetch templates list on mount
-  useEffect(() => {
-    (async () => {
-      try {
-        const resp = await fetch(`${API_BASE}/hr-documents/templates`);
-        const json = await resp.json();
-        if (json.success) {
-          setTemplatesList(json.templates || []);
-        }
-      } catch (e) {
-        console.error('Failed to load templates', e);
-      }
-    })();
-  }, [API_BASE]);
-
-  // Handle template selection from dropdown
-  const handleTemplateSelect = async (templateId: string) => {
-    if (!templateId) {
-      setTemplate(null);
-      return;
-    }
-    try {
-      const resp = await fetch(`${API_BASE}/hr-documents/templates/${encodeURIComponent(templateId)}`);
-      const json = await resp.json();
-      if (json.success && json.template) {
-        const t: UploadedTemplate = {
-          id: json.template.id || templateId,
-          name: json.template.originalname || json.template.name || templateId,
-          type: (json.template.format || 'html').toLowerCase(),
-          previewHtml: json.template.html || json.template.previewHtml || null,
-        };
-        setTemplate(t);
-      }
-    } catch (e) {
-      console.error('Failed to load template', e);
-    }
-  };
-
-  // When an employee is selected, populate the form
-  const handleEmployeeSelect = (empId: string) => {
-    const emp = employees.find((x) => String(x.id) === empId) || null;
-    setSelectedEmployee(emp);
-    if (emp) {
-      setEmployeeData({
-        employee_name: emp.full_name || emp.employee_name || emp.name || '',
-        employee_id: emp.employee_id || emp.id || '',
-        designation: emp.job_title || emp.designation || '',
-        department: emp.department || '',
-        date_of_joining: formatDate(emp.join_date || emp.date_of_joining),
-        date_of_leaving: formatDate(emp.date_of_leaving),
-        salary: emp.salary || '',
-        address: emp.address || '',
-        email: emp.email || emp.personal_email || '',
-        phone: emp.phone || '',
-        manager_name: emp.reporting_manager || emp.manager_name || '',
-        company_name: emp.company_name || 'TechieMaya FZE',
-      });
-    }
-  };
-
-  // Fetch merged preview from backend when template + employeeData changes
-  const [mergedPreviewHtml, setMergedPreviewHtml] = useState<string | null>(null);
-  const [previewInfo, setPreviewInfo] = useState<{ hasPlaceholders: boolean; placeholders: string[]; message: string } | null>(null);
-  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
-  
-  // Debounced fetch function for preview
-  const fetchPreview = useCallback(async (templateId: string, data: EmployeeData) => {
-    try {
-      const resp = await fetch(`${API_BASE}/hr-documents/generate/preview`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ templateId, data }),
-      });
-      const json = await resp.json();
-      if (json.success) {
-        setMergedPreviewHtml(json.html || null);
-        setPreviewInfo({
-          hasPlaceholders: json.hasPlaceholders || false,
-          placeholders: json.placeholders || [],
-          message: json.message || ''
-        });
-      } else {
-        setMergedPreviewHtml(null);
-        setPreviewInfo(null);
-      }
-    } catch (e) {
-      console.error('Preview fetch failed', e);
-      setMergedPreviewHtml(null);
-      setPreviewInfo(null);
-    }
-  }, [API_BASE]);
-
-  useEffect(() => {
-    if (!template?.id) {
-      setMergedPreviewHtml(null);
-      setPreviewInfo(null);
-      return;
-    }
-    
-    // Clear existing timer
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
-    
-    // Debounce API call by 300ms for smooth typing
-    debounceTimerRef.current = setTimeout(() => {
-      fetchPreview(template.id!, employeeData);
-    }, 300);
-    
-    return () => {
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
+        const response = await api.profiles.getAll() as any;
+        const profilesList = response.profiles || response || [];
+        setEmployees(profilesList);
+      } catch (error) {
+        console.error('Error fetching employees:', error);
+      } finally {
+        setLoadingEmployees(false);
       }
     };
-  }, [template?.id, employeeData, fetchPreview]);
+    fetchEmployees();
+  }, []);
 
-  // Build a template object with merged preview for DocumentPreview component
-  const templateForPreview = useMemo<UploadedTemplate | null>(() => {
-    if (!template) return null;
-    return { ...template, previewHtml: mergedPreviewHtml || template.previewHtml };
-  }, [template, mergedPreviewHtml]);
-
-  // Simple upload state for this page
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [uploadDocType, setUploadDocType] = useState<string>('payslip');
-  const [uploading, setUploading] = useState(false);
-  const [uploadMessage, setUploadMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files && e.target.files[0];
-    setUploadFile(f || null);
-  };
-
-  const handleUpload = async () => {
-    if (!uploadFile) {
-      setUploadMessage({ type: 'error', text: 'Please select a file to upload.' });
+  // Auto-fill employee data when employee is selected
+  const handleEmployeeSelect = async (employeeId: string) => {
+    setSelectedEmployeeId(employeeId);
+    if (!employeeId) {
+      setEmployeeData(defaultEmployeeData);
       return;
     }
-
-    const fd = new FormData();
-    fd.append('template', uploadFile);
-    fd.append('documentType', uploadDocType);
-    fd.append('name', uploadFile.name.replace(/\.[^/.]+$/, ''));
-
+    const employee = employees.find(e => e.id === employeeId);
     try {
-      setUploading(true);
-      setUploadMessage(null);
-
-      const resp = await fetch(`${API_BASE}/hr-documents/templates/upload`, { method: 'POST', body: fd });
-      const data = await resp.json();
-
-      if (data.success) {
-        setUploadMessage({ type: 'success', text: 'Uploaded and analyzed successfully.' });
-        setUploadFile(null);
-
-        // Refresh templates list
-        try {
-          const listResp = await fetch(`${API_BASE}/hr-documents/templates`);
-          const listJson = await listResp.json();
-          if (listJson.success) setTemplatesList(listJson.templates || []);
-        } catch (e) {
-          console.warn('Failed to refresh templates list', e);
-        }
-
-        // Load details for the uploaded template (backend returns meta.filename)
-        const newId = data.meta?.filename || data.meta?.id || null;
-        if (newId) {
-          try {
-            const detailResp = await fetch(`${API_BASE}/hr-documents/templates/${encodeURIComponent(newId)}`);
-            const detailJson = await detailResp.json();
-            if (detailJson.success && detailJson.template) {
-              const t: UploadedTemplate = {
-                id: detailJson.template.id || newId,
-                name: detailJson.template.originalname || detailJson.template.name || newId,
-                type: (detailJson.template.format || 'html').toLowerCase(),
-                previewHtml: detailJson.template.html || detailJson.template.previewHtml || null,
-              };
-              setTemplate(t);
-            }
-          } catch (e) {
-            console.warn('Failed to load uploaded template details', e);
-          }
-        }
-      } else {
-        setUploadMessage({ type: 'error', text: data.error || 'Upload failed' });
-      }
-    } catch (err) {
-      console.error(err);
-      setUploadMessage({ type: 'error', text: 'Upload failed. See console for details.' });
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const handleDeleteTemplate = async () => {
-    if (!template?.id) return;
-    if (!confirm(`Are you sure you want to delete "${template.name || template.id}"?`)) return;
-    
-    try {
-      const resp = await fetch(`${API_BASE}/hr-documents/templates/${encodeURIComponent(template.id)}`, {
-        method: 'DELETE',
+      // Fetch joining form for full details (including bank info)
+      const joiningForm = await joiningFormService.getJoiningFormById(employeeId);
+      const info = joiningForm?.employee_info || {};
+      setEmployeeData({
+        employee_name: info.full_name || employee?.full_name || '',
+        employee_id: info.employee_id || employee?.employee_id || employee?.id?.slice(0, 8) || '',
+        designation: info.designation || employee?.designation || employee?.job_title || '',
+        department: info.department || employee?.department || '',
+        date_of_joining: info.join_date || employee?.date_of_joining || employee?.joining_date || '',
+        date_of_leaving: '',
+        salary: info.salary?.toString() || '',
+        address: info.current_address || employee?.address || '',
+        email: info.email || employee?.email || '',
+        phone: info.phone || employee?.phone || '',
+        manager_name: info.manager_name || employee?.manager_name || info.reporting_manager || '',
+        company_name: 'TechieMaya',
+        bank_name: info.bank_name || '',
+        bank_account: info.bank_account_number || '',
+        pan_number: info.pan_number || '',
+        location: info.location || '',
+        leave_balance: info.leave_balance?.toString() || employee?.leave_balance?.toString() || '',
+        effective_work_days: info.effective_work_days?.toString() || employee?.effective_work_days?.toString() || '',
+        lop: info.lop?.toString() || employee?.lop?.toString() || '',
+        basic_salary: info.basic_salary?.toString() || '',
+        hra: info.hra?.toString() || '',
+        other_allowances: info.other_allowances?.toString() || '',
+        pt: info.pt?.toString() || '',
+        total_earnings: info.total_earnings?.toString() || '',
+        total_deduction: info.total_deduction?.toString() || '',
+        net_pay: info.net_pay?.toString() || '',
+        rupees_in_words: info.rupees_in_words || '',
       });
-      const json = await resp.json();
-      if (json.success) {
-        // Remove from templates list
-        setTemplatesList(prev => prev.filter(t => t.id !== template.id));
-        setTemplate(null);
-        setMergedPreviewHtml(null);
-        setPreviewInfo(null);
-        setUploadMessage({ type: 'success', text: 'Template deleted successfully' });
-      } else {
-        alert(json.error || 'Failed to delete template');
-      }
-    } catch (e) {
-      console.error('Delete error', e);
-      alert('Failed to delete template');
-    }
-  };
-
-  const handleDeleteTemplateById = async (templateId: string, templateName?: string) => {
-    if (!confirm(`Are you sure you want to delete "${templateName || templateId}"?`)) return;
-    
-    try {
-      const resp = await fetch(`${API_BASE}/hr-documents/templates/${encodeURIComponent(templateId)}`, {
-        method: 'DELETE',
+      toast({
+        title: 'Employee data loaded',
+        description: `Details for ${info.full_name || employee?.full_name || employee?.email} have been filled`,
       });
-      const json = await resp.json();
-      if (json.success) {
-        // Remove from templates list
-        setTemplatesList(prev => prev.filter(t => t.id !== templateId));
-        // If currently selected template was deleted, clear it
-        if (template?.id === templateId) {
-          setTemplate(null);
-          setMergedPreviewHtml(null);
-          setPreviewInfo(null);
-        }
-        setUploadMessage({ type: 'success', text: 'Template deleted successfully' });
-      } else {
-        alert(json.error || 'Failed to delete template');
-      }
-    } catch (e) {
-      console.error('Delete error', e);
-      alert('Failed to delete template');
-    }
-  };
-
-  // Improved PDF download logic
-  const handleDownloadPdf = async () => {
-    if (!template?.id) return;
-    try {
-      const resp = await fetch(`${API_BASE}/hr-documents/generate/pdf`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ templateId: template.id, data: employeeData }),
+    } catch (error) {
+      console.error('Error fetching joining form:', error);
+      // Fallback to basic employee data
+      setEmployeeData({
+        ...defaultEmployeeData,
+        employee_name: employee?.full_name || '',
+        email: employee?.email || '',
+        employee_id: employee?.employee_id || employee?.id?.slice(0, 8) || '',
       });
-      if (!resp.ok) {
-        alert('PDF generation failed');
-        return;
-      }
-      const blob = await resp.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${(template.name || 'document').replace(/\.[^.]+$/, '')}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      console.error('PDF download error', e);
-      alert('PDF download failed');
     }
   };
 
-  // Improved DOCX download logic
+  const makeSafeFileName = (name: string) => {
+    const cleaned = name
+      .trim()
+      .replace(/\s+/g, " ")
+      .replace(/[\\/:*?"<>|]+/g, "")
+      .replace(/\.+$/g, "");
+
+    return cleaned.length > 0 ? cleaned : "document";
+  };
+
+  const getEmployeeFileBaseName = () => {
+    const raw = employeeData.employee_name?.trim();
+    return makeSafeFileName(raw || "employee_document");
+  };
+
+  const validateBeforeDownload = (): boolean => {
+    if (!template) {
+      toast({
+        title: "No template loaded",
+        description: "Please upload a document template first.",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    const filledFields = Object.entries(employeeData).filter(([_, v]) => v.trim() !== "");
+    if (filledFields.length === 0) {
+      toast({
+        title: "No data entered",
+        description: "Please fill in at least one employee field.",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    return true;
+  };
+
   const handleDownloadDocx = async () => {
-    if (!template?.id) return;
+    if (!validateBeforeDownload() || !template) return;
+
     try {
-      const resp = await fetch(`${API_BASE}/hr-documents/generate/docx`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ templateId: template.id, data: employeeData }),
+      setIsDownloading(true);
+      const mergedContent = await mergeDocxWithData(template.content, employeeData);
+      const blob = new Blob([mergedContent], {
+        type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       });
-      if (!resp.ok) {
-        alert('DOCX generation failed');
-        return;
-      }
-      const blob = await resp.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${(template.name || 'document').replace(/\.[^.]+$/, '')}.docx`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      console.error('DOCX download error', e);
-      alert('DOCX download failed');
+
+      saveAs(blob, `${getEmployeeFileBaseName()}.docx`);
+
+      toast({
+        title: "Document downloaded",
+        description: "Your merged DOCX document has been saved.",
+      });
+    } catch (error) {
+      console.error("Download error:", error);
+      const message =
+        error && typeof error === "object" && "name" in error && (error as any).name === "TemplateError"
+          ? "Your template has an invalid placeholder (example: use {employee_name} or [employee_name])."
+          : "There was an error generating the document.";
+      toast({
+        title: "Download failed",
+        description: message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsDownloading(false);
     }
   };
 
-  // Refresh preview by re-fetching template content
-  const handleRefreshPreview = async () => {
-    if (!template?.id) return;
+  const handleDownloadPdf = async () => {
+    if (!validateBeforeDownload() || !template) return;
+
+    let tempContainer: HTMLDivElement | null = null;
+    let styleEl: HTMLStyleElement | null = null;
+
     try {
-      const resp = await fetch(`${API_BASE}/hr-documents/templates/${template.id}`);
-      const data = await resp.json();
-      if (data.success && data.template) {
-        setTemplate(data.template);
-        setMergedPreviewHtml(null); // Reset to trigger re-merge
+      setIsDownloading(true);
+
+      const baseName = getEmployeeFileBaseName();
+
+      if (template.type === "pdf") {
+        saveAs(template.file, `${baseName}.pdf`);
+        toast({
+          title: "PDF downloaded",
+          description: "Your PDF document has been saved.",
+        });
+        return;
       }
-    } catch (e) {
-      console.error('Refresh error', e);
+
+      const mergedContent = await mergeDocxWithData(template.content, employeeData);
+
+      tempContainer = document.createElement("div");
+      tempContainer.id = "docx-pdf-render";
+      tempContainer.style.cssText = `
+        position: fixed;
+        left: -9999px;
+        top: 0;
+        width: 794px;
+        background: white;
+        z-index: -9999;
+        overflow: visible;
+      `;
+      document.body.appendChild(tempContainer);
+
+      styleEl = document.createElement("style");
+      styleEl.id = "docx-pdf-styles";
+      styleEl.textContent = `
+        #docx-pdf-render {
+          background: white !important;
+          font-family: 'Times New Roman', Times, serif !important;
+        }
+        #docx-pdf-render .docx-wrapper {
+          background: white !important;
+          padding: 0 !important;
+          margin: 0 !important;
+        }
+        #docx-pdf-render section.docx {
+          margin: 0 !important;
+          padding: 40px 50px !important;
+          box-shadow: none !important;
+          background: white !important;
+          min-height: 1123px !important;
+          height: 1123px !important;
+          width: 794px !important;
+          overflow: hidden !important;
+          position: relative !important;
+          display: flex !important;
+          flex-direction: column !important;
+          box-sizing: border-box !important;
+        }
+        #docx-pdf-render article.docx-header {
+          display: block !important;
+          visibility: visible !important;
+          position: relative !important;
+          width: 100% !important;
+          min-height: 60px !important;
+          padding-bottom: 10px !important;
+          border-bottom: none !important;
+          flex-shrink: 0 !important;
+        }
+        #docx-pdf-render article.docx-footer {
+          display: block !important;
+          visibility: visible !important;
+          position: absolute !important;
+          bottom: 40px !important;
+          left: 50px !important;
+          right: 50px !important;
+          width: auto !important;
+          min-height: 40px !important;
+          padding-top: 10px !important;
+        }
+        #docx-pdf-render .docx-body {
+          flex: 1 !important;
+          overflow: hidden !important;
+        }
+        #docx-pdf-render img {
+          max-width: 100% !important;
+          height: auto !important;
+          display: inline-block !important;
+          visibility: visible !important;
+        }
+        #docx-pdf-render table {
+          width: 100% !important;
+          border-collapse: collapse !important;
+        }
+        #docx-pdf-render * {
+          box-sizing: border-box !important;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+        #docx-pdf-render p, #docx-pdf-render span {
+          visibility: visible !important;
+        }
+      `;
+      document.head.appendChild(styleEl);
+
+      await renderAsync(mergedContent, tempContainer, undefined, {
+        className: "docx",
+        inWrapper: true,
+        ignoreWidth: false,
+        ignoreHeight: false,
+        ignoreFonts: false,
+        breakPages: true,
+        ignoreLastRenderedPageBreak: false,
+        experimental: true,
+        trimXmlDeclaration: true,
+        useBase64URL: true,
+        renderHeaders: true,
+        renderFooters: true,
+        renderFootnotes: true,
+        renderEndnotes: true,
+      });
+
+      const images = tempContainer.querySelectorAll("img");
+      await Promise.all(
+        Array.from(images).map(
+          (img) =>
+            img.complete
+              ? Promise.resolve()
+              : new Promise((resolve) => {
+                  img.onload = resolve;
+                  img.onerror = resolve;
+                })
+        )
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 800));
+
+      const sections = tempContainer.querySelectorAll("section.docx");
+
+      const pdf = new jsPDF("p", "mm", "a4");
+      const pdfWidth = 210;
+      const pdfHeight = 297;
+
+      const captureSection = async (sectionEl: HTMLElement, pageIndex: number) => {
+        const canvas = await html2canvas(sectionEl, {
+          scale: 2,
+          useCORS: true,
+          allowTaint: false,
+          backgroundColor: "#ffffff",
+          logging: false,
+          imageTimeout: 20000,
+          width: 794,
+          height: 1123,
+          onclone: (clonedDoc) => {
+            clonedDoc.querySelectorAll("img").forEach((img) => {
+              (img as HTMLImageElement).crossOrigin = "anonymous";
+              (img as HTMLElement).style.visibility = "visible";
+            });
+
+            const clonedSection = clonedDoc.querySelector(`section.docx:nth-of-type(${pageIndex + 1})`);
+            if (clonedSection) {
+              clonedSection.querySelectorAll("*").forEach((el) => {
+                (el as HTMLElement).style.visibility = "visible";
+              });
+            }
+          },
+        });
+
+        let dataUrl: string;
+        try {
+          dataUrl = canvas.toDataURL("image/png", 1.0);
+        } catch (e) {
+          throw new Error(
+            "Cannot render the PDF because an image/logo blocks canvas export (CORS). If your template uses external logos, embed them into the DOCX file."
+          );
+        }
+
+        if (pageIndex > 0) pdf.addPage();
+        pdf.addImage(dataUrl, "PNG", 0, 0, pdfWidth, pdfHeight);
+      };
+
+      if (sections.length > 0) {
+        for (let i = 0; i < sections.length; i++) {
+          const section = sections[i] as HTMLElement;
+          section.style.display = "block";
+          section.style.visibility = "visible";
+          await captureSection(section, i);
+        }
+      } else {
+        const wrapper = (tempContainer.querySelector(".docx-wrapper") || tempContainer) as HTMLElement;
+        await captureSection(wrapper, 0);
+      }
+
+      const pdfBlob = pdf.output("blob");
+      saveAs(pdfBlob, `${baseName}.pdf`);
+
+      toast({
+        title: "PDF downloaded",
+        description: "Your merged PDF document has been saved.",
+      });
+    } catch (error) {
+      console.error("PDF download error:", error);
+      const message =
+        error && typeof error === "object" && "name" in error && (error as any).name === "TemplateError"
+          ? "Your template has an invalid placeholder (example: use {employee_name} or [employee_name])."
+          : error instanceof Error
+            ? error.message
+            : "There was an error generating the PDF. Try downloading DOCX instead.";
+      toast({
+        title: "PDF download failed",
+        description: message,
+        variant: "destructive",
+      });
+    } finally {
+      try {
+        if (tempContainer?.parentNode) document.body.removeChild(tempContainer);
+        if (styleEl?.parentNode) document.head.removeChild(styleEl);
+      } catch {
+        // ignore cleanup errors
+      }
+      setIsDownloading(false);
     }
+  };
+
+  const handleClearForm = () => {
+    setEmployeeData(defaultEmployeeData);
+    toast({
+      title: "Form cleared",
+      description: "All employee data has been reset.",
+    });
   };
 
   return (
     <div className="p-6">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="text-2xl font-bold mb-1">HR Documents</h1>
-          <p className="text-sm text-muted-foreground">Manage document templates and generate merged documents.</p>
-        </div>
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold">HR Document Generator</h1>
+        <p className="text-muted-foreground">Upload templates and merge employee data to generate documents</p>
       </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-[50%_50%] gap-6">
-        {/* Left: actions + upload + employee form */}
-        <div>
-          <div className="bg-white border rounded-lg p-4">
-            <h4 className="font-medium mb-2">Upload Template</h4>
-            <label className="block text-sm text-gray-700 mb-1">Document Type</label>
-            <select
-              value={uploadDocType}
-              onChange={(e) => setUploadDocType(e.target.value)}
-              className="block w-full rounded-md border-gray-300 mb-3"
-            >
-              <option value="payslip">Employee Payslip</option>
-              <option value="offer_letter">Offer Letter</option>
-              <option value="appointment_letter">Appointment Letter</option>
-              <option value="experience_letter">Experience Letter</option>
-              <option value="relieving_letter">Relieving Letter</option>
-              <option value="asset_allocation">Asset Allocation Form</option>
-              <option value="asset_handover">Asset Handover Form</option>
-              <option value="id_card">ID Card Details</option>
-              <option value="exit_clearance">Exit/Clearance Form</option>
-              <option value="pf_statement">PF Statement</option>
-              <option value="salary_breakup">Salary Breakup Statement</option>
-            </select>
-
-            <label className="block text-sm text-gray-700 mb-1">Template File</label>
-            <input type="file" onChange={handleFileChange} className="block w-full mb-3" />
-
-            <button
-              onClick={handleUpload}
-              disabled={uploading}
-              className="w-full px-3 py-2 bg-blue-600 text-white rounded-md disabled:opacity-50"
-            >
-              {uploading ? 'Uploading…' : 'Upload Template'}
-            </button>
-
-            {uploadMessage && (
-              <div className={`mt-3 p-2 rounded ${uploadMessage.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                {uploadMessage.text}
-              </div>
-            )}
-          </div>
-
-          {/* Employee Selection */}
-          <div className="mt-6 bg-white border rounded-lg p-4">
-            <h4 className="font-medium mb-2 flex items-center gap-2">
-              <User className="h-4 w-4" /> Select Employee
-            </h4>
-            <select
-              className="w-full border rounded p-2 mb-4"
-              value={selectedEmployee?.id || ''}
-              onChange={(e) => handleEmployeeSelect(e.target.value)}
-            >
-              <option value="">-- Select Employee --</option>
-              {employees.map((emp) => (
-                <option key={emp.id} value={emp.id}>
-                  {emp.employee_name || emp.full_name || emp.name || emp.email || emp.id}
-                </option>
-              ))}
-            </select>
-
-            <h4 className="font-medium mb-2">Employee Data (editable)</h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <input placeholder="Employee name" value={employeeData.employee_name} onChange={(e) => setEmployeeData({...employeeData, employee_name: e.target.value})} className="p-2 border rounded" />
-              <input placeholder="Employee ID" value={employeeData.employee_id} onChange={(e) => setEmployeeData({...employeeData, employee_id: e.target.value})} className="p-2 border rounded" />
-              <input placeholder="Designation" value={employeeData.designation} onChange={(e) => setEmployeeData({...employeeData, designation: e.target.value})} className="p-2 border rounded" />
-              <input placeholder="Department" value={employeeData.department} onChange={(e) => setEmployeeData({...employeeData, department: e.target.value})} className="p-2 border rounded" />
-              <input placeholder="Date of joining" value={employeeData.date_of_joining} onChange={(e) => setEmployeeData({...employeeData, date_of_joining: e.target.value})} className="p-2 border rounded" />
-              <input placeholder="Date of leaving" value={employeeData.date_of_leaving || ''} onChange={(e) => setEmployeeData({...employeeData, date_of_leaving: e.target.value})} className="p-2 border rounded" />
-                {/* Date of Ending field removed */}
-              <input placeholder="Email" value={employeeData.email} onChange={(e) => setEmployeeData({...employeeData, email: e.target.value})} className="p-2 border rounded" />
-              <input placeholder="Phone" value={employeeData.phone} onChange={(e) => setEmployeeData({...employeeData, phone: e.target.value})} className="p-2 border rounded" />
+      
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Left Column - Upload & Form */}
+        <div className="space-y-6">
+          {/* Template Category Selector */}
+          <section>
+            <div className="flex items-center gap-2 mb-4">
+              <h2 className="text-lg font-semibold text-foreground">1. Select Template Type</h2>
             </div>
-          </div>
-
-          {/* Template Selection */}
-          <div className="mt-6 bg-white border rounded-lg p-4">
-            <h4 className="font-medium mb-2 flex items-center gap-2">
-              <FileText className="h-4 w-4" /> Select Template
-            </h4>
-            <div className="flex gap-2">
-              <select
-                className="flex-1 border rounded p-2"
-                value={template?.id || ''}
-                onChange={(e) => handleTemplateSelect(e.target.value)}
-              >
-                <option value="">-- Select Template --</option>
-                {templatesList.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name || t.id}
-                  </option>
-                ))}
-              </select>
-              {template && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+              {templateCategories.map((cat) => (
                 <button
-                  onClick={handleDeleteTemplate}
-                  className="px-3 py-2 bg-red-100 text-red-600 rounded hover:bg-red-200 flex items-center gap-1"
-                  title="Delete this template"
+                  key={cat.id}
+                  onClick={async () => {
+                    setSelectedCategory(cat.id);
+                    setSelectedUploadedTemplateIdx(null);
+                    // Try to fetch a default template for this category (if available)
+                    // For now, clear uploaded template and setTemplate(null)
+                    setTemplate(null);
+                    // Optionally, fetch a default template from server or static assets here
+                    // Example: await fetchDefaultTemplate(cat.id)
+                  }}
+                  className={`p-3 rounded-lg border text-left transition-all ${
+                    selectedCategory === cat.id && selectedUploadedTemplateIdx === null
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                  }`}
                 >
-                  <Trash2 className="h-4 w-4" />
+                  <p className="font-medium text-sm">{cat.name}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{cat.description}</p>
                 </button>
-              )}
+              ))}
+            </div>
+
+            {/* Uploaded Templates List */}
+            {uploadedTemplates.length > 0 && (
+              <>
+                <div className="mt-2 mb-2 text-xs font-semibold text-foreground">Uploaded Templates</div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+                  {uploadedTemplates.map((ut, idx) => (
+                    <button
+                      key={ut.name + idx}
+                      onClick={() => {
+                        setSelectedUploadedTemplateIdx(idx);
+                        setSelectedCategory('');
+                        setTemplate(ut);
+                      }}
+                      className={`p-3 rounded-lg border text-left transition-all flex flex-col ${
+                        selectedUploadedTemplateIdx === idx
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                      }`}
+                    >
+                      <span className="font-medium text-sm truncate">{ut.name}</span>
+                      <span className="text-xs text-muted-foreground uppercase mt-1">{ut.type} template</span>
+                      <button
+                        className="text-xs text-red-500 mt-2 underline self-start"
+                        type="button"
+                        onClick={e => {
+                          e.stopPropagation();
+                          setUploadedTemplates(prev => prev.filter((_, i) => i !== idx));
+                          if (selectedUploadedTemplateIdx === idx) {
+                            setSelectedUploadedTemplateIdx(null);
+                            setTemplate(null);
+                          }
+                        }}
+                      >Remove</button>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+
+            <div className="text-sm text-muted-foreground mb-3">
+              {selectedCategory
+                ? <span className="text-primary">Selected: {templateCategories.find(c => c.id === selectedCategory)?.name}</span>
+                : selectedUploadedTemplateIdx !== null && uploadedTemplates[selectedUploadedTemplateIdx]
+                  ? <span className="text-primary">Selected: {uploadedTemplates[selectedUploadedTemplateIdx].name}</span>
+                  : 'Or upload your own template below:'}
+            </div>
+
+            <TemplateUpload
+              onTemplateUpload={tpl => {
+                setUploadedTemplates(prev => [...prev, tpl]);
+                setSelectedUploadedTemplateIdx(uploadedTemplates.length); // select the new one
+                setSelectedCategory('');
+                setTemplate(tpl);
+              }}
+              currentTemplate={template}
+              onRemoveTemplate={() => {
+                if (selectedUploadedTemplateIdx !== null) {
+                  setUploadedTemplates(prev => prev.filter((_, i) => i !== selectedUploadedTemplateIdx));
+                  setSelectedUploadedTemplateIdx(null);
+                  setTemplate(null);
+                } else {
+                  setTemplate(null);
+                }
+              }}
+            />
+          </section>
+
+          {/* Employee Selector */}
+          <section className="border border-border rounded-lg p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-foreground">2. Select Employee</h2>
+              <button
+                onClick={handleClearForm}
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Clear all
+              </button>
             </div>
             
-            {/* Templates list with delete */}
-            {templatesList.length > 0 && (
-              <div className="mt-4 max-h-48 overflow-y-auto border rounded">
-                {templatesList.map((t) => (
-                  <div 
-                    key={t.id} 
-                    className={`flex items-center justify-between p-2 hover:bg-gray-50 border-b last:border-b-0 ${template?.id === t.id ? 'bg-blue-50' : ''}`}
-                  >
-                    <button
-                      onClick={() => handleTemplateSelect(t.id)}
-                      className="flex-1 text-left text-sm truncate"
-                    >
-                      {t.name || t.id}
-                    </button>
-                    <button
-                      onClick={() => handleDeleteTemplateById(t.id, t.name)}
-                      className="p-1 text-red-500 hover:text-red-700 hover:bg-red-50 rounded"
-                      title="Delete template"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ))}
+            {/* Employee Dropdown */}
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-foreground mb-2">
+                <User className="h-4 w-4 inline-block mr-2" />
+                Choose Employee
+              </label>
+              <div className="relative">
+                <select
+                  value={selectedEmployeeId}
+                  onChange={(e) => handleEmployeeSelect(e.target.value)}
+                  className="w-full h-10 px-3 pr-10 border border-border rounded-md bg-background text-foreground appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                  disabled={loadingEmployees}
+                >
+                  <option value="">
+                    {loadingEmployees ? 'Loading employees...' : '-- Select an employee to auto-fill --'}
+                  </option>
+                  {employees.map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.full_name || emp.email} {emp.employee_id ? `(${emp.employee_id})` : ''}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="h-4 w-4 absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
               </div>
-            )}
+              {selectedEmployeeId && (
+                <p className="text-xs text-green-600 mt-2">
+                  ✓ Employee data loaded. You can still edit fields below.
+                </p>
+              )}
+            </div>
+
+            <div className="border-t border-border pt-4">
+              <p className="text-sm text-muted-foreground mb-4">Or enter details manually:</p>
+              <EmployeeDataForm data={employeeData} onChange={setEmployeeData} />
+            </div>
+          </section>
+
+          <div className="flex gap-3">
+            <Button
+              onClick={handleDownloadDocx}
+              className="flex-1 h-12 font-medium"
+              disabled={!template || isDownloading}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Download DOCX
+            </Button>
+            <Button
+              onClick={handleDownloadPdf}
+              variant="outline"
+              className="flex-1 h-12 font-medium"
+              disabled={!template || isDownloading}
+            >
+              <FileText className="h-4 w-4 mr-2" />
+              Download PDF
+            </Button>
+          </div>
+
+          <div className="bg-accent/30 rounded-xl p-4 border border-border">
+            <div className="flex items-start gap-3">
+              <div className="p-1.5 rounded-md bg-primary/10 mt-0.5">
+                <Sparkles className="h-4 w-4 text-primary" />
+              </div>
+              <div>
+                <h4 className="font-medium text-sm text-foreground mb-1">Supported Placeholders</h4>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Use these formats in your template: <code className="bg-background px-1 rounded">{'{field}'}</code> or <code className="bg-background px-1 rounded">[field]</code>
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { key: "employee_name", alt: "Employee name" },
+                    { key: "employee_id", alt: "Employee ID" },
+                    { key: "designation", alt: "Designation" },
+                    { key: "department", alt: "Department" },
+                    { key: "date_of_joining", alt: "Date of joining" },
+                    { key: "date_of_leaving", alt: "Date of Ending" },
+                    { key: "salary", alt: "Salary" },
+                    { key: "email", alt: "Email" },
+                    { key: "phone", alt: "Phone" },
+                    { key: "address", alt: "Address" },
+                    { key: "manager_name", alt: "Manager Name" },
+                    { key: "company_name", alt: "Company Name" },
+                  ].map(({ key, alt }) => (
+                    <code
+                      key={key}
+                      className="text-xs bg-background px-2 py-0.5 rounded border border-border text-muted-foreground"
+                      title={`Also accepts: [${alt}]`}
+                    >
+                      {`{${key}}`}
+                    </code>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground mt-2 italic">
+                  Tip: Also works with [Employee name], [Date of Ending], etc.
+                </p>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Right: preview */}
-        <aside className="lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-2rem)]">
-          <div className="bg-white border rounded-lg p-4 mb-4">
-            <h3 className="font-medium mb-2">Document Preview</h3>
-            <p className="text-sm text-muted-foreground">Live preview of merged document using the current employee data.</p>
-            {previewInfo && (
-              <div className={`mt-3 p-2 rounded text-xs ${previewInfo.hasPlaceholders ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-yellow-50 text-yellow-700 border border-yellow-200'}`}>
-                {previewInfo.hasPlaceholders ? (
-                  <>✅ Template has {previewInfo.placeholders.length} placeholder(s): {previewInfo.placeholders.slice(0, 5).join(', ')}{previewInfo.placeholders.length > 5 ? '...' : ''}</>
-                ) : (
-                  <>⚠️ This template has no placeholders (hardcoded). Employee data shown for reference only.</>
-                )}
-              </div>
-            )}
+        {/* Right Column - Preview */}
+        <div>
+          <div className="flex items-center gap-2 mb-4">
+            <h2 className="text-lg font-semibold text-foreground">3. Preview</h2>
           </div>
-          
-          <div className="bg-white border rounded-lg overflow-hidden max-h-[calc(100vh-14rem)] overflow-y-auto">
-            {template ? (
-              <>
-                <div className="flex gap-2 mb-4">
-                  <button
-                    onClick={handleDownloadDocx}
-                    className="px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-                  >
-                    Download DOCX
-                  </button>
-                  <button
-                    onClick={handleDownloadPdf}
-                    className="px-3 py-2 bg-green-600 text-white rounded hover:bg-green-700"
-                  >
-                    Download PDF
-                  </button>
-                </div>
-                <DocumentPreview template={templateForPreview} employeeData={employeeData} onDownloadPdf={handleDownloadPdf} onRefresh={handleRefreshPreview} />
-              </>
-            ) : (
-              <div className="p-8 text-center text-gray-500">
-                <FileText className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                <p className="text-sm">Select a template to see the preview</p>
-              </div>
-            )}
-          </div>
-        </aside>
+          <DocumentPreview 
+            template={template} 
+            employeeData={employeeData} 
+            onDownloadPdf={handleDownloadPdf} 
+            onDownloadDocx={handleDownloadDocx} 
+          />
+        </div>
       </div>
     </div>
   );
-};
-
-export default HRDocumentsPage;
-
+}

@@ -91,7 +91,7 @@ const Users = () => {
       console.error("Error loading users:", error);
       toast({
         title: "Error",
-        description: error.message || "Failed to load users",
+        description: error.message || "Failed to load employees",
         variant: "destructive",
       });
       setUsers([]);
@@ -131,7 +131,7 @@ const Users = () => {
 
       toast({
         title: "Role Updated",
-        description: `User role changed to ${newRole}`,
+        description: `Employee role changed to ${newRole}`,
       });
       loadUsers();
     } catch (error: any) {
@@ -164,8 +164,8 @@ const Users = () => {
       });
 
       toast({
-        title: "User Created",
-        description: `User ${newUserEmail} has been created successfully`,
+        title: "Employee Created",
+        description: `Employee ${newUserEmail} has been created successfully`,
       });
 
       setShowAddDialog(false);
@@ -176,7 +176,7 @@ const Users = () => {
     } catch (error: any) {
       toast({
         title: "Error",
-        description: error.message || "Failed to create user",
+        description: error.message || "Failed to create employee",
         variant: "destructive",
       });
     } finally {
@@ -203,14 +203,14 @@ const Users = () => {
       await api.users.delete(userId);
 
       toast({
-        title: "User Deleted",
-        description: `User ${userEmail} has been deleted`,
+        title: "Employee Deleted",
+        description: `Employee ${userEmail} has been deleted`,
       });
       loadUsers();
     } catch (error: any) {
       toast({
         title: "Error",
-        description: error.message || "Failed to delete user",
+        description: error.message || "Failed to delete employee",
         variant: "destructive",
       });
     } finally {
@@ -238,19 +238,19 @@ const Users = () => {
     <div className="min-h-screen bg-background p-4 md:p-8">
       <div className="mx-auto max-w-6xl">
         <div className="mb-6 flex items-center justify-between">
-          <h1 className="text-2xl font-bold">User Management</h1>
+          <h1 className="text-2xl font-bold">Employee Management</h1>
           <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
             <DialogTrigger asChild>
               <Button>
                 <UserPlus className="mr-2 h-4 w-4" />
-                Add User
+                Add Employee
               </Button>
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Add New User</DialogTitle>
+                <DialogTitle>Add New Employee</DialogTitle>
                 <DialogDescription>
-                  Create a new user account. They will receive a magic link to login.
+                  Create a new employee account. They will receive a magic link to login.
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-4">
@@ -281,7 +281,7 @@ const Users = () => {
                     value={newUserRole}
                     onChange={(e) => setNewUserRole(e.target.value)}
                   >
-                    <option value="user">User</option>
+                    <option value="user">Employee</option>
                     <option value="admin">Admin</option>
                   </select>
                 </div>
@@ -291,7 +291,7 @@ const Users = () => {
                   Cancel
                 </Button>
                 <Button onClick={handleAddUser} disabled={addingUser}>
-                  {addingUser ? "Creating..." : "Create User"}
+                  {addingUser ? "Creating..." : "Create Employee"}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -303,7 +303,7 @@ const Users = () => {
             <div className="flex items-center justify-between">
               <CardTitle className="flex items-center gap-2">
                 <UsersIcon className="h-5 w-5" />
-                All Users
+                All Employees
               </CardTitle>
               <Button
                 variant="outline"
@@ -318,9 +318,9 @@ const Users = () => {
           </CardHeader>
           <CardContent>
             {loading && users.length === 0 ? (
-              <p className="text-center text-muted-foreground py-8">Loading users...</p>
+              <p className="text-center text-muted-foreground py-8">Loading employees...</p>
             ) : users.length === 0 ? (
-              <p className="text-center text-muted-foreground py-8">No users found</p>
+              <p className="text-center text-muted-foreground py-8">No employees found</p>
             ) : (
               <div className="space-y-3">
                 {users.map((user) => (
@@ -343,7 +343,7 @@ const Users = () => {
                               : "bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200"
                           }`}
                         >
-                          {user.role}
+                          {user.role === "admin" ? "admin" : "employee"}
                         </span>
                         {user.id === currentUser?.id && (
                           <span className="text-xs text-muted-foreground">(You)</span>
@@ -387,14 +387,14 @@ const Users = () => {
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             <p>
-              <strong>Admin:</strong> Can create tasks, assign tasks to users, and manage user
+              <strong>Admin:</strong> Can create tasks, assign tasks to employees, and manage employee
               roles.
             </p>
             <p>
-              <strong>User:</strong> Can only clock in/out to tasks assigned to them by admins.
+              <strong>Employee:</strong> Can only clock in/out to tasks assigned to them by admins.
             </p>
             <p className="text-muted-foreground mt-4">
-              💡 Tip: Go to the Issues page to create and assign issues to users.
+              💡 Tip: Go to the Issues page to create and assign issues to employees.
             </p>
           </CardContent>
         </Card>

@@ -1,3 +1,16 @@
+// Create a new joining form (profile) and return the created form (with id)
+import type { JoiningForm } from "./types";
+export async function createJoiningForm(data: Partial<JoiningForm>): Promise<JoiningForm> {
+  // Step 1: Create new profile to get ID
+  const createRes = await api.post("/joining-form/create");
+  console.log('Create response:', createRes); // Debug log
+  const profileId = createRes.profileId || (createRes.data && createRes.data.profileId);
+  if (!profileId) throw new Error("Failed to create profileId");
+  // Step 2: Save form data to the new profile
+  const saveRes = await api.post(`/joining-form/${profileId}`, data);
+  // Return the saved form with id
+  return { ...(data as any), id: profileId, ...(saveRes.form || {}) };
+}
 /**
  * Joining Form Services
  */

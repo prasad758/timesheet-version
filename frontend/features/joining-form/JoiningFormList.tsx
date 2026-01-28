@@ -95,9 +95,12 @@ const JoiningFormList = () => {
   return (
     <div className="h-full flex flex-col p-6 bg-gray-50">
       {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">New Joining Forms</h1>
-        <p className="text-gray-500">Manage employee onboarding forms</p>
+      <div className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">New Joining Forms</h1>
+          <p className="text-gray-500">Manage employee onboarding forms</p>
+        </div>
+        {/* Removed Add Employee button as requested */}
       </div>
 
       {/* Stats Cards */}

@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { getJoiningFormById } from '../../joining-form/services/joiningFormService';
+import type { JoiningForm } from '@/features/joining-form/types';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -65,6 +67,23 @@ export const ProfileDetailDialog = ({
   const [deleting, setDeleting] = useState(false);
   const [uploadFiles, setUploadFiles] = useState<{ [key: string]: File | null }>({});
 
+
+  // State for joining form data
+  const [joiningForm, setJoiningForm] = useState<JoiningForm | null>(null);
+  const [loadingJoiningForm, setLoadingJoiningForm] = useState(false);
+
+  // Fetch joining form data when profile changes
+  useEffect(() => {
+    if (profile?.id) {
+      setLoadingJoiningForm(true);
+      getJoiningFormById(profile.id)
+        .then((form) => setJoiningForm(form))
+        .finally(() => setLoadingJoiningForm(false));
+    } else {
+      setJoiningForm(null);
+    }
+  }, [profile?.id]);
+
   if (!profile) return null;
 
   const handleTabClick = (tab: string) => {
@@ -99,6 +118,23 @@ export const ProfileDetailDialog = ({
                   {profile.job_title || profile.role}
                   {profile.department && ` • ${profile.department}`}
                 </p>
+                <div className="flex items-center mt-2">
+                  <span className="text-xs text-gray-400 mr-2">User ID:</span>
+                  <span className="text-xs font-mono bg-gray-100 px-2 py-1 rounded select-all">{profile.id}</span>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="ml-1 h-6 w-6"
+                    onClick={() => {
+                      navigator.clipboard.writeText(profile.id);
+                      setCopiedUuid(true);
+                      setTimeout(() => setCopiedUuid(false), 1200);
+                    }}
+                  >
+                    {copiedUuid ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+                  </Button>
+                </div>
               </div>
             </div>
             <div className="flex items-center space-x-2">
@@ -142,7 +178,7 @@ export const ProfileDetailDialog = ({
 
         {/* Tabs */}
         <div className="flex space-x-1 border-b mb-4 overflow-x-auto">
-          {['basic', 'contact', 'skills', 'experience', 'projects', 'education', 'performance', 'burnout', 'hr-payroll', 'documents', 'assets', 'activity'].map(tab => (
+          {['basic', 'contact', 'family', 'education', 'experience', 'health', 'verification'].map(tab => (
             <button
               key={tab}
               onClick={() => handleTabClick(tab)}
@@ -159,89 +195,119 @@ export const ProfileDetailDialog = ({
 
         {/* Tab Content */}
         <div className="space-y-6">
-          {/* Basic Information */}
+          {/* Basic Information (from joining form) */}
           {activeTab === 'basic' && (
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label className="text-xs text-gray-500">Full Name</Label>
-                <p className="text-sm font-medium">{profile.full_name || 'N/A'}</p>
-              </div>
-              <div>
-                <Label className="text-xs text-gray-500">User ID (UUID)</Label>
-                <div className="flex items-center space-x-2">
-                  <p className="text-sm font-mono font-medium text-gray-700 flex-1 truncate">{profile.id || 'N/A'}</p>
-                  {profile.id && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2"
-                      onClick={() => {
-                        navigator.clipboard.writeText(profile.id);
-                        setCopiedUuid(true);
-                        setTimeout(() => setCopiedUuid(false), 2000);
-                        toast({
-                          title: 'Copied!',
-                          description: 'User ID copied to clipboard',
-                        });
-                      }}
-                    >
-                      {copiedUuid ? (
-                        <Check className="h-3 w-3 text-green-600" />
-                      ) : (
-                        <Copy className="h-3 w-3" />
-                      )}
-                    </Button>
-                  )}
+            loadingJoiningForm ? (
+              <div>Loading joining form data...</div>
+            ) : joiningForm ? (
+              <>
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                  <div>
+                    <Label className="text-xs text-gray-500">Full Name</Label>
+                    <p className="text-sm font-medium">{joiningForm.employee_info.full_name || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-500">Employee Code</Label>
+                    <p className="text-sm font-medium">{joiningForm.employee_info.employee_id || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-500">Date of Birth</Label>
+                    <p className="text-sm font-medium">{joiningForm.employee_info.date_of_birth || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-500">Gender</Label>
+                    <p className="text-sm font-medium">{joiningForm.employee_info.gender || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-500">Joining Date</Label>
+                    <p className="text-sm font-medium">{joiningForm.employee_info.join_date || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-500">Designation</Label>
+                    <p className="text-sm font-medium">{joiningForm.employee_info.designation || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-500">Department</Label>
+                    <p className="text-sm font-medium">{joiningForm.employee_info.department || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-500">Marital Status</Label>
+                    <p className="text-sm font-medium">{joiningForm.employee_info.marital_status || 'N/A'}</p>
+                  </div>
                 </div>
-                <p className="text-xs text-gray-400 mt-1">Use this UUID when creating payslips</p>
-              </div>
-              {profile.employee_id && (
-                <div>
-                  <Label className="text-xs text-gray-500">Employee ID</Label>
-                  <p className="text-sm font-medium">{profile.employee_id}</p>
+                {/* Contact Information */}
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                  <div>
+                    <Label className="text-xs text-gray-500">Mobile Number</Label>
+                    <p className="text-sm font-medium">{joiningForm.employee_info.phone || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-500">Personal Email</Label>
+                    <p className="text-sm font-medium">{joiningForm.employee_info.personal_email || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-500">Official Email</Label>
+                    <p className="text-sm font-medium">{joiningForm.employee_info.email || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-500">Current Address</Label>
+                    <p className="text-sm font-medium">{joiningForm.employee_info.current_address || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-500">Permanent Address</Label>
+                    <p className="text-sm font-medium">{joiningForm.employee_info.permanent_address || 'N/A'}</p>
+                  </div>
                 </div>
-              )}
-              <div>
-                <Label className="text-xs text-gray-500">Job Title</Label>
-                <p className="text-sm font-medium">{profile.job_title || profile.role || 'N/A'}</p>
-              </div>
-              <div>
-                <Label className="text-xs text-gray-500">Department</Label>
-                <p className="text-sm font-medium">{profile.department || 'N/A'}</p>
-              </div>
-              <div>
-                <Label className="text-xs text-gray-500">Date of Joining</Label>
-                <p className="text-sm font-medium">
-                  {profile.join_date 
-                    ? format(new Date(profile.join_date), "MMMM dd, yyyy")
-                    : 'N/A'}
-                </p>
-              </div>
-              <div>
-                <Label className="text-xs text-gray-500">Employment Type</Label>
-                <p className="text-sm font-medium">{profile.employment_type || 'Full-time'}</p>
-              </div>
-              {profile.reporting_manager && (
-                <div>
-                  <Label className="text-xs text-gray-500">Reporting Manager</Label>
-                  <p className="text-sm font-medium">{profile.reporting_manager}</p>
+                {/* Bank Details */}
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                  <div>
+                    <Label className="text-xs text-gray-500">Bank Name</Label>
+                    <p className="text-sm font-medium">{joiningForm.employee_info.bank_name || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-500">Bank IFSC</Label>
+                    <p className="text-sm font-medium">{joiningForm.employee_info.bank_ifsc || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-500">Bank Branch</Label>
+                    <p className="text-sm font-medium">{joiningForm.employee_info.bank_branch || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-500">Bank Account Number</Label>
+                    <p className="text-sm font-medium">{joiningForm.employee_info.bank_account_number || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-500">UAN Number</Label>
+                    <p className="text-sm font-medium">{joiningForm.employee_info.uan_number || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-500">PF Number</Label>
+                    <p className="text-sm font-medium">{joiningForm.employee_info.pf_number || 'N/A'}</p>
+                  </div>
                 </div>
-              )}
-              <div>
-                <Label className="text-xs text-gray-500">Total Experience</Label>
-                <p className="text-sm font-medium">
-                  {profile.experience_years 
-                    ? `${profile.experience_years} years`
-                    : 'N/A'}
-                </p>
-              </div>
-              {profile.bio && (
-                <div className="col-span-2">
-                  <Label className="text-xs text-gray-500">Bio</Label>
-                  <p className="text-sm text-gray-700 mt-1">{profile.bio}</p>
+                {/* Health Information */}
+                <div className="grid grid-cols-3 gap-4 mb-6">
+                  <div>
+                    <Label className="text-xs text-gray-500">Blood Group</Label>
+                    <p className="text-sm font-medium">{joiningForm.employee_info.blood_group || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-500">Height (cm)</Label>
+                    <p className="text-sm font-medium">{joiningForm.employee_info.height || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-500">Weight (kg)</Label>
+                    <p className="text-sm font-medium">{joiningForm.employee_info.weight || 'N/A'}</p>
+                  </div>
+                  <div className="col-span-3">
+                    <Label className="text-xs text-gray-500">Any Major Surgery/Illness in Past</Label>
+                    <p className="text-sm font-medium">{joiningForm.employee_info.medical_history || 'N/A'}</p>
+                  </div>
                 </div>
-              )}
-            </div>
+              </>
+            ) : (
+              <div>No joining form data found for this employee.</div>
+            )
           )}
 
           {/* Contact Information */}

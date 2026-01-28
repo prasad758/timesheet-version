@@ -1,4 +1,144 @@
 /**
+ * Send background verification document upload link email
+ */
+export async function sendVerificationMailEmail({ to, candidateName, verificationType, verificationName, uploadLink }) {
+  try {
+    if (!resend) {
+      console.log('⚠️ Resend not configured, skipping verification mail');
+      return { success: false, fallback: true };
+    }
+    const subject = `Document Upload Request: ${verificationName}`;
+    const html = `
+      <div style="max-width:600px;margin:0 auto;font-family:Arial,sans-serif;">
+        <div style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);padding:24px;text-align:center;border-radius:10px 10px 0 0;">
+          <h1 style="color:white;margin:0;font-size:24px;">Document Upload Request</h1>
+        </div>
+        <div style="background:#f8f9fa;padding:24px;border-radius:0 0 10px 10px;">
+          <h2 style="color:#333;margin-top:0;">Hi ${candidateName},</h2>
+          <p style="color:#666;font-size:16px;">Please upload your documents for the following verification:</p>
+          <ul style="color:#333;font-size:16px;">
+            <li><strong>Verification Type:</strong> ${verificationType}</li>
+            <li><strong>Verification Name:</strong> ${verificationName}</li>
+          </ul>
+          <div style="margin:24px 0;text-align:center;">
+            <a href="${uploadLink}" style="background:#667eea;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;">Upload Documents</a>
+          </div>
+          <p style="color:#888;font-size:14px;">If you have any questions, reply to this email.</p>
+        </div>
+      </div>
+    `;
+    const text = `Hi ${candidateName},\n\nPlease upload your documents for verification (${verificationType}: ${verificationName}).\nUpload link: ${uploadLink}`;
+    const { data, error } = await resend.emails.send({
+      from: EMAIL_CONFIG.from,
+      to: [to],
+      replyTo: EMAIL_CONFIG.replyTo,
+      subject,
+      html,
+      text,
+    });
+    if (error) {
+      console.error('❌ Resend error:', error);
+      throw new Error(`Resend API error: ${error.message}`);
+    }
+    console.log('📧 Verification mail sent:', data.id);
+    return { success: true, messageId: data.id };
+  } catch (error) {
+    console.error('❌ Failed to send verification mail:', error);
+    throw new Error('Failed to send verification mail');
+  }
+}
+/**
+ * Send interview round notification email
+ */
+export async function sendInterviewRoundEmail({ to, candidateName, roundName, interviewerName, interviewerEmail, interviewDate }) {
+  try {
+    if (!resend) {
+      console.log('⚠️ Resend not configured, skipping interview round email');
+      return { success: false, fallback: true };
+    }
+    const subject = `Interview Scheduled: ${roundName}`;
+    const html = `<div style="max-width:600px;margin:0 auto;font-family:Arial,sans-serif;">
+      <div style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);padding:24px;text-align:center;border-radius:10px 10px 0 0;">
+        <h1 style="color:white;margin:0;font-size:24px;">Interview Round Scheduled</h1>
+      </div>
+      <div style="background:#f8f9fa;padding:24px;border-radius:0 0 10px 10px;">
+        <h2 style="color:#333;margin-top:0;">Hi ${candidateName},</h2>
+        <p style="color:#666;font-size:16px;">Your interview round has been scheduled with the following details:</p>
+        <ul style="color:#333;font-size:16px;">
+          <li><strong>Round:</strong> ${roundName}</li>
+          <li><strong>Interviewer:</strong> ${interviewerName}</li>
+          <li><strong>Date & Time:</strong> ${interviewDate ? new Date(interviewDate).toLocaleString() : 'TBD'}</li>
+        </ul>
+        <p style="color:#666;font-size:15px;">Please be prepared and reach out if you have any questions.</p>
+      </div>
+    </div>`;
+    const text = `Hi ${candidateName},\n\nYour interview round has been scheduled.\n\nRound: ${roundName}\nInterviewer: ${interviewerName}\nDate & Time: ${interviewDate ? new Date(interviewDate).toLocaleString() : 'TBD'}\n\nPlease be prepared and reach out if you have any questions.`;
+
+    // Generate ICS calendar invite
+    let icsAttachment = null;
+    if (interviewDate) {
+      const start = new Date(interviewDate);
+      const end = new Date(start.getTime() + 60 * 60 * 1000); // 1 hour duration
+      const dtStamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+      const dtStart = start.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+      const dtEnd = end.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+      const uid = `interview-${start.getTime()}@techiemaya.com`;
+      const organizerName = 'TechieMaya HR';
+      const organizerEmail = 'noreply@pulse.techiemaya.com';
+      const candidateEmail = to;
+      // interviewerEmail may be undefined, fallback to default if needed in ICS
+      const icsContent = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//TechieMaya//Interview Scheduler//EN',
+        'CALSCALE:GREGORIAN',
+        'METHOD:REQUEST',
+        'BEGIN:VEVENT',
+        `UID:${uid}`,
+        `DTSTAMP:${dtStamp}`,
+        `DTSTART:${dtStart}`,
+        `DTEND:${dtEnd}`,
+        'SUMMARY:Technical Interview – TechieMaya',
+        `DESCRIPTION:Interview Round: ${roundName}\\nInterviewer: ${interviewerName}`,
+        'LOCATION:Online',
+        `ORGANIZER;CN=${organizerName}:MAILTO:${organizerEmail}`,
+        `ATTENDEE;CN=Candidate;ROLE=REQ-PARTICIPANT;RSVP=TRUE:MAILTO:${candidateEmail}`,
+        `ATTENDEE;CN=Interviewer;ROLE=REQ-PARTICIPANT;RSVP=TRUE:MAILTO:${interviewerEmail || 'interviewer@techiemaya.com'}`,
+        'SEQUENCE:0',
+        'STATUS:CONFIRMED',
+        'TRANSP:OPAQUE',
+        'END:VEVENT',
+        'END:VCALENDAR'
+      ].join('\r\n');
+      icsAttachment = {
+        filename: 'interview.ics',
+        content: Buffer.from(icsContent).toString('base64'),
+        type: 'text/calendar',
+      };
+    }
+
+    const emailOptions = {
+      from: EMAIL_CONFIG.from,
+      to: [to],
+      replyTo: EMAIL_CONFIG.replyTo,
+      subject,
+      html,
+      text,
+      attachments: icsAttachment ? [icsAttachment] : [],
+    };
+    const { data, error } = await resend.emails.send(emailOptions);
+    if (error) {
+      console.error('❌ Resend error:', error);
+      throw new Error(`Resend API error: ${error.message}`);
+    }
+    console.log('📧 Interview round email sent:', data.id);
+    return { success: true, messageId: data.id };
+  } catch (error) {
+    console.error('❌ Failed to send interview round email:', error);
+    throw new Error('Failed to send interview round email');
+  }
+}
+/**
  * Email Service
  * Handles sending emails using Resend API
  */

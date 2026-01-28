@@ -353,7 +353,7 @@ const Monitoring = () => {
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <div className="max-w-7xl mx-auto p-6">
         <div className="flex items-center justify-between mb-6">
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">User Monitoring</h1>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Employee Monitoring</h1>
           <div className="flex gap-2">
             <Button onClick={loadAllActiveEntries} variant="outline">
               <RefreshCw className="h-4 w-4 mr-2" />
@@ -377,7 +377,7 @@ const Monitoring = () => {
           
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-gray-600 dark:text-gray-400">Active Users</CardTitle>
+              <CardTitle className="text-sm font-medium text-gray-600 dark:text-gray-400">Active Employees</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-green-600 dark:text-green-400">
@@ -422,7 +422,7 @@ const Monitoring = () => {
           
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-gray-600 dark:text-gray-400">Unique Users</CardTitle>
+              <CardTitle className="text-sm font-medium text-gray-600 dark:text-gray-400">Unique Employees</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{summaryStats.uniqueUsers}</div>
@@ -441,14 +441,14 @@ const Monitoring = () => {
                   onChange={(e) => setSelectedUserId(e.target.value)}
                   className="text-sm px-3 py-1.5 border rounded-md bg-white dark:bg-gray-800 dark:border-gray-700"
                 >
-                  <option value="all">All Users ({allEntries.length})</option>
+                  <option value="all">All Employees ({allEntries.length})</option>
                   {users.map((user) => (
                     <option key={user.user_id} value={user.user_id}>
                       {user.email} ({allEntries.filter(e => e.user_id === user.user_id).length})
                     </option>
                   ))}
                 </select>
-                <span className="text-sm font-normal text-gray-500">Real-time user activity</span>
+                <span className="text-sm font-normal text-gray-500">Real-time employee activity</span>
               </div>
             </CardTitle>
           </CardHeader>

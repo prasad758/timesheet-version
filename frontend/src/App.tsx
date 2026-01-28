@@ -3,6 +3,8 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import ProjectManagementPage from "./pages/project-management";
+import UploadDocsPage from "@features/recruitment/pages/UploadDocsPage";
 import { AuthGuard } from "./components/AuthGuard";
 import { Layout } from "./components/Layout";
 import Auth from "./pages/Auth";
@@ -23,6 +25,7 @@ import Git from "@features/git";
 import HRDocumentsPage from "@features/hr-documents";
 import TemplatesPage from "@features/hr-documents/templates-page";
 import JoiningFormPage from "@features/joining-form/page";
+import RecruitmentPage from "@features/recruitment/page";
 // HRDocumentGenerator removed
 
 const queryClient = new QueryClient();
@@ -46,6 +49,9 @@ const App = () => (
               </AuthGuard>
             }
           />
+          {/* Public route for document upload via verification link */}
+          <Route path="/upload-docs/:candidateId/:verificationId" element={<UploadDocsPage />} />
+
           <Route
             path="/projects"
             element={
@@ -56,6 +62,18 @@ const App = () => (
               </AuthGuard>
             }
           />
+
+          <Route
+            path="/project-management"
+            element={
+              <AuthGuard>
+                <Layout>
+                  <ProjectManagementPage />
+                </Layout>
+              </AuthGuard>
+            }
+          />
+
           <Route
             path="/projects/:id"
             element={
@@ -106,6 +124,27 @@ const App = () => (
               </AuthGuard>
             }
           />
+          {/* Recruitment routes for 3-stage hiring process */}
+          <Route
+            path="/recruitment"
+            element={
+              <AuthGuard>
+                <Layout>
+                  <ResourceManagement />
+                </Layout>
+              </AuthGuard>
+            }
+          />
+          <Route
+            path="/recruitment/:id"
+            element={
+              <AuthGuard>
+                <Layout>
+                  <RecruitmentPage />
+                </Layout>
+              </AuthGuard>
+            }
+          />
           {/* Legacy routes - kept for backward compatibility */}
           <Route
             path="/joining-form"
@@ -132,7 +171,17 @@ const App = () => (
             element={
               <AuthGuard>
                 <Layout>
-                  <ResourceManagement />
+                  <Profiles />
+                </Layout>
+              </AuthGuard>
+            }
+          />
+          <Route
+            path="/employee"
+            element={
+              <AuthGuard>
+                <Layout>
+                  <Profiles onlyCurrentUser />
                 </Layout>
               </AuthGuard>
             }

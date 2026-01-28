@@ -9,4 +9,5 @@ export const db = new pg.Pool({
   password: process.env.DB_PASS,
   database: process.env.DB_NAME,
   port: Number(process.env.DB_PORT),
+  connectionTimeoutMillis: 10000, // 10 seconds
 });

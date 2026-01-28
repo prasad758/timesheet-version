@@ -528,67 +528,19 @@ const Payslips = () => {
 /**
  * Create Payslip Dialog Component
  */
-const CreatePayslipDialog = ({ isOpen, onClose, onSuccess }: { isOpen: boolean; onClose: () => void; onSuccess: () => void }) => {
-  const [payslipForm, setPayslipForm] = useState({
-    user_id: '',
-    employee_id: '',
-    month: new Date().getMonth() + 1,
-    year: new Date().getFullYear(),
-    basic_pay: '',
-    hra: '',
-    special_allowance: '',
-    bonus: '',
-    incentives: '',
-    other_earnings: '',
-    pf_employee: '',
-    pf_employer: '',
-    esi_employee: '',
-    esi_employer: '',
-    professional_tax: '',
-    tds: '',
-    other_deductions: '',
-    company_name: '',
-    company_address: '',
-    issue_date: new Date().toISOString().split('T')[0],
-  });
+import EmployeeDataForm from '@/features/hr-documents/components/EmployeeDataForm';
+import { EmployeeData, defaultEmployeeData } from '@/features/hr-documents/types';
 
+const CreatePayslipDialog = ({ isOpen, onClose, onSuccess }: { isOpen: boolean; onClose: () => void; onSuccess: () => void }) => {
+  const [employeeData, setEmployeeData] = useState<EmployeeData>(defaultEmployeeData);
   const mutations = usePayrollMutation();
 
   const handleSubmit = async () => {
-    if (!payslipForm.user_id || !payslipForm.basic_pay) {
-      toast({
-        title: 'Error',
-        description: 'Please fill in required fields',
-        variant: 'destructive',
-      });
-      return;
-    }
-
     try {
       await mutations.upsertPayslip.mutateAsync({
-        user_id: payslipForm.user_id,
-        employee_id: payslipForm.employee_id || undefined,
-        month: payslipForm.month,
-        year: payslipForm.year,
-        basic_pay: parseFloat(payslipForm.basic_pay),
-        hra: payslipForm.hra ? parseFloat(payslipForm.hra) : 0,
-        special_allowance: payslipForm.special_allowance ? parseFloat(payslipForm.special_allowance) : 0,
-        bonus: payslipForm.bonus ? parseFloat(payslipForm.bonus) : 0,
-        incentives: payslipForm.incentives ? parseFloat(payslipForm.incentives) : 0,
-        other_earnings: payslipForm.other_earnings ? parseFloat(payslipForm.other_earnings) : 0,
-        pf_employee: payslipForm.pf_employee ? parseFloat(payslipForm.pf_employee) : 0,
-        pf_employer: payslipForm.pf_employer ? parseFloat(payslipForm.pf_employer) : 0,
-        esi_employee: payslipForm.esi_employee ? parseFloat(payslipForm.esi_employee) : 0,
-        esi_employer: payslipForm.esi_employer ? parseFloat(payslipForm.esi_employer) : 0,
-        professional_tax: payslipForm.professional_tax ? parseFloat(payslipForm.professional_tax) : 0,
-        tds: payslipForm.tds ? parseFloat(payslipForm.tds) : 0,
-        other_deductions: payslipForm.other_deductions ? parseFloat(payslipForm.other_deductions) : 0,
-        company_name: payslipForm.company_name || undefined,
-        company_address: payslipForm.company_address || undefined,
-        issue_date: payslipForm.issue_date || undefined,
+        ...employeeData,
         status: 'generated',
       });
-
       toast({
         title: 'Success',
         description: 'Payslip created successfully',
@@ -610,94 +562,16 @@ const CreatePayslipDialog = ({ isOpen, onClose, onSuccess }: { isOpen: boolean; 
           <DialogTitle>Create Payslip</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="user_id">User ID *</Label>
-              <Input
-                id="user_id"
-                value={payslipForm.user_id}
-                onChange={(e) => setPayslipForm({ ...payslipForm, user_id: e.target.value })}
-                placeholder="UUID"
-              />
-            </div>
-            <div>
-              <Label htmlFor="employee_id">Employee ID</Label>
-              <Input
-                id="employee_id"
-                value={payslipForm.employee_id}
-                onChange={(e) => setPayslipForm({ ...payslipForm, employee_id: e.target.value })}
-              />
-            </div>
-            <div>
-              <Label htmlFor="month">Month *</Label>
-              <Input
-                id="month"
-                type="number"
-                min="1"
-                max="12"
-                value={payslipForm.month}
-                onChange={(e) => setPayslipForm({ ...payslipForm, month: parseInt(e.target.value) || 1 })}
-              />
-            </div>
-            <div>
-              <Label htmlFor="year">Year *</Label>
-              <Input
-                id="year"
-                type="number"
-                min="2000"
-                max="2100"
-                value={payslipForm.year}
-                onChange={(e) => setPayslipForm({ ...payslipForm, year: parseInt(e.target.value) || new Date().getFullYear() })}
-              />
-            </div>
-          </div>
-
-          <div className="border-t pt-4">
-            <h4 className="text-sm font-semibold mb-3">Earnings</h4>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="basic_pay">Basic Pay *</Label>
-                <Input
-                  id="basic_pay"
-                  type="number"
-                  step="0.01"
-                  value={payslipForm.basic_pay}
-                  onChange={(e) => setPayslipForm({ ...payslipForm, basic_pay: e.target.value })}
-                />
-              </div>
-              <div>
-                <Label htmlFor="hra">HRA</Label>
-                <Input
-                  id="hra"
-                  type="number"
-                  step="0.01"
-                  value={payslipForm.hra}
-                  onChange={(e) => setPayslipForm({ ...payslipForm, hra: e.target.value })}
-                />
-              </div>
-              <div>
-                <Label htmlFor="special_allowance">Special Allowance</Label>
-                <Input
-                  id="special_allowance"
-                  type="number"
-                  step="0.01"
-                  value={payslipForm.special_allowance}
-                  onChange={(e) => setPayslipForm({ ...payslipForm, special_allowance: e.target.value })}
-                />
-              </div>
-              <div>
-                <Label htmlFor="bonus">Bonus</Label>
-                <Input
-                  id="bonus"
-                  type="number"
-                  step="0.01"
-                  value={payslipForm.bonus}
-                  onChange={(e) => setPayslipForm({ ...payslipForm, bonus: e.target.value })}
-                />
-              </div>
-              <div>
-                <Label htmlFor="incentives">Incentives</Label>
-                <Input
+          {/* Only show template fields for payslip creation */}
+          <EmployeeDataForm data={employeeData} onChange={setEmployeeData} />
+        </div>
+        <DialogFooter>
+          <Button onClick={handleSubmit} type="button">Create Payslip</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
                   id="incentives"
                   type="number"
                   step="0.01"

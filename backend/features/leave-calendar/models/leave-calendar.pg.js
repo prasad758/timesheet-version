@@ -79,18 +79,123 @@ export async function updateShiftRoster(shiftData) {
 
 /**
  * Get attendance records for a date range
+ * Fetches from time_clock table and aggregates by date
  */
 export async function getAttendance(startDate, endDate) {
-  const result = await pool.query(
-    `SELECT a.*, u.email, u.full_name, sr.shift_type
-     FROM erp.attendance a
-     JOIN erp.users u ON a.user_id = u.id
-     LEFT JOIN erp.shift_roster sr ON a.user_id = sr.user_id AND a.date = sr.date
-     WHERE a.date BETWEEN $1 AND $2
-     ORDER BY a.date, u.full_name`,
+  // Generate all dates in range
+  const dateRows = await pool.query(
+    `SELECT generate_series($1::date, $2::date, interval '1 day') AS date`,
     [startDate, endDate]
   );
-  return result.rows;
+  const dates = dateRows.rows.map(r => r.date);
+
+  // Get all employees (active profiles with join_date)
+  const userRows = await pool.query(`
+    SELECT u.id, u.email, u.full_name
+    FROM erp.users u
+    JOIN erp.profiles p ON u.id = p.id
+    WHERE p.join_date IS NOT NULL
+  `);
+  const users = userRows.rows;
+
+  // Build attendance map: { [user_id_date]: attendanceRow }
+  const attendanceRows = await pool.query(
+    `SELECT 
+       tc.user_id,
+       u.email,
+       u.full_name,
+       DATE(tc.clock_in) as date,
+       MIN(tc.clock_in) as clock_in,
+       MAX(tc.clock_out) as clock_out,
+       COALESCE(SUM(tc.total_hours), 0) as total_hours,
+       sr.shift_type,
+       CASE 
+         WHEN COALESCE(SUM(tc.total_hours), 0) >= 8 THEN 'present'
+         WHEN COALESCE(SUM(tc.total_hours), 0) >= 4 THEN 'half_day'
+         WHEN COALESCE(SUM(tc.total_hours), 0) > 0 THEN 'present'
+         ELSE 'absent'
+       END as status
+     FROM erp.time_clock tc
+     JOIN erp.users u ON tc.user_id = u.id
+     LEFT JOIN erp.shift_roster sr ON tc.user_id = sr.user_id AND DATE(tc.clock_in) = sr.date
+     WHERE DATE(tc.clock_in) BETWEEN $1 AND $2
+       AND tc.status = 'clocked_out'
+     GROUP BY tc.user_id, u.email, u.full_name, DATE(tc.clock_in), sr.shift_type
+     ORDER BY DATE(tc.clock_in) DESC, u.full_name`,
+    [startDate, endDate]
+  );
+  const attendanceMap = {};
+  for (const row of attendanceRows.rows) {
+    attendanceMap[`${row.user_id}_${row.date.toISOString().slice(0,10)}`] = row;
+  }
+
+  // Get all approved leave requests in the range
+  const leaveRows = await pool.query(
+    `SELECT user_id, start_date, end_date FROM erp.leave_requests WHERE status = 'approved' AND start_date <= $2 AND end_date >= $1`,
+    [startDate, endDate]
+  );
+  const leaveMap = {};
+  for (const row of leaveRows.rows) {
+    const leaveDates = [];
+    let d = new Date(row.start_date);
+    const end = new Date(row.end_date);
+    while (d <= end) {
+      leaveDates.push(d.toISOString().slice(0,10));
+      d = new Date(d.getTime() + 86400000);
+    }
+    for (const ld of leaveDates) {
+      leaveMap[`${row.user_id}_${ld}`] = true;
+    }
+  }
+
+  // Build full result: all users x all dates
+  const result = [];
+  for (const user of users) {
+    for (const date of dates) {
+      const key = `${user.id}_${date.toISOString().slice(0,10)}`;
+      if (attendanceMap[key]) {
+        // Ensure real records have an id (from db or fallback)
+        result.push({
+          id: attendanceMap[key].id || key,
+          ...attendanceMap[key],
+        });
+      } else {
+        // Only mark as 'absent' for past dates, but check leave
+        const today = new Date();
+        const dateOnly = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+        let status = '';
+        if (leaveMap[key]) {
+          status = 'on_leave';
+        } else if (dateOnly < todayOnly) {
+          status = 'absent';
+        } else if (dateOnly.getTime() === todayOnly.getTime()) {
+          status = 'upcoming'; // today
+        } else {
+          status = 'upcoming'; // future
+        }
+        result.push({
+          id: key,
+          user_id: user.id,
+          email: user.email,
+          full_name: user.full_name,
+          date: date,
+          clock_in: null,
+          clock_out: null,
+          total_hours: 0,
+          shift_type: null,
+          status: status,
+        });
+      }
+    }
+  }
+  // Sort by date desc, then user name
+  result.sort((a, b) => {
+    if (a.date > b.date) return -1;
+    if (a.date < b.date) return 1;
+    return (a.full_name || a.email).localeCompare(b.full_name || b.email);
+  });
+  return result;
 }
 
 /**

@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
+import JoiningForm from "../joining-form/JoiningForm";
 import { api } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 // LAD Architecture: Use SDK instead of direct API calls
@@ -62,7 +63,11 @@ type SortOption = 'name' | 'join_date' | 'experience' | 'department';
 type FilterStatus = 'all' | 'active' | 'onboarding' | 'ex-employee';
 type ViewMode = 'grid' | 'list' | 'kanban';
 
-const Profiles = () => {
+interface ProfilesProps {
+  onlyCurrentUser?: boolean;
+}
+
+const Profiles = ({ onlyCurrentUser = false }: ProfilesProps) => {
   const { id: profileId } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -81,6 +86,18 @@ const Profiles = () => {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [selectedProfile, setSelectedProfile] = useState<EmployeeProfile | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
+
+  // If onlyCurrentUser is true, show detail dialog by default
+  useEffect(() => {
+    if (onlyCurrentUser && currentUser && profiles.length > 0) {
+      const userProfile = profiles.find((p) => p.id === currentUser.id || p.email === currentUser.email);
+      if (userProfile) {
+        setSelectedProfile(userProfile);
+        setIsDetailOpen(true);
+      }
+    }
+  }, [onlyCurrentUser, currentUser, profiles]);
+
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<string>('basic');
@@ -435,6 +452,12 @@ const Profiles = () => {
   const filteredAndSortedProfiles = useMemo(() => {
     let filtered = [...profiles];
 
+    // If onlyCurrentUser, filter to just the current user's profile
+    if (onlyCurrentUser && currentUser) {
+      filtered = filtered.filter(p => p.id === currentUser.id || p.email === currentUser.email);
+      return filtered; // Skip other filters for single user mode
+    }
+
     // Search filter
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
@@ -502,7 +525,7 @@ const Profiles = () => {
     });
 
     return filtered;
-  }, [profiles, searchQuery, filterDepartment, filterRole, filterStatus, filterExperience, sortBy, sortOrder]);
+  }, [profiles, searchQuery, filterDepartment, filterRole, filterStatus, filterExperience, sortBy, sortOrder, onlyCurrentUser, currentUser]);
 
   // Fetch employee assets
   const fetchEmployeeAssets = async (userId: string) => {
@@ -568,11 +591,20 @@ const Profiles = () => {
 
   return (
     <div className="p-6">
+
+
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Employee Profiles</h1>
-          <p className="text-gray-500 mt-1">View and manage employee directory and professional history</p>
+          <h1 className="text-3xl font-bold text-gray-900">
+            {onlyCurrentUser ? 'My Profile' : 'Employee Profiles'}
+          </h1>
+          <p className="text-gray-500 mt-1">
+            {onlyCurrentUser 
+              ? 'View and manage your profile details' 
+              : 'View and manage employee directory and professional history'}
+          </p>
         </div>
+        {!onlyCurrentUser && (
         <div className="flex items-center space-x-2">
           {/* Download Template Button */}
           <Button
@@ -802,558 +834,18 @@ const Profiles = () => {
             </Button>
           </div>
           {(isAdmin || true) && (
-            <Dialog open={isAddOpen} onOpenChange={(open) => {
-              setIsAddOpen(open);
-              if (open) setActiveTab('basic');
-            }}>
+            <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
               <DialogTrigger asChild>
                 <Button>
                   <Plus className="h-4 w-4 mr-2" />
                   Add Profile
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+              <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>Add Employee Profile</DialogTitle>
                 </DialogHeader>
-
-                {/* Tabs for different sections */}
-                <div className="flex space-x-1 border-b mb-4 overflow-x-auto">
-                  {['basic', 'assets', 'id-card', 'projects', 'performance', 'burnout', 'activity'].map(tab => (
-                    <button
-                      key={tab}
-                      onClick={() => setActiveTab(tab)}
-                      className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${activeTab === tab
-                        ? 'border-blue-600 text-blue-600'
-                        : 'border-transparent text-gray-500 hover:text-gray-700'
-                        }`}
-                    >
-                      {tab.charAt(0).toUpperCase() + tab.slice(1).replace('_', ' ').replace('-', ' ')}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="space-y-4">
-                  {/* Basic Information Tab */}
-                  {activeTab === 'basic' && (
-                    <>
-                      <div>
-                        <Label htmlFor="add_email">Select User *</Label>
-                        <select
-                          id="add_email"
-                          value={addForm.email || ''}
-                          onChange={(e) => {
-                            const selectedUser = users.find(u => u.email === e.target.value);
-                            setAddForm({
-                              ...addForm,
-                              email: e.target.value,
-                              full_name: selectedUser?.full_name || addForm.full_name,
-                            });
-                          }}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                          <option value="">Select a user...</option>
-                          {users
-                            .filter(u => !profiles.find(p => p.email === u.email))
-                            .map(user => (
-                              <option key={user.id} value={user.email}>
-                                {user.email} {user.full_name ? `(${user.full_name})` : ''}
-                              </option>
-                            ))}
-                        </select>
-                        <p className="text-xs text-gray-500 mt-1">
-                          Only users without profiles are shown
-                        </p>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <Label htmlFor="add_full_name">Full Name</Label>
-                          <Input
-                            id="add_full_name"
-                            value={addForm.full_name || ''}
-                            onChange={(e) => setAddForm({ ...addForm, full_name: e.target.value })}
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="add_job_title">Job Title</Label>
-                          <Input
-                            id="add_job_title"
-                            value={addForm.job_title || ''}
-                            onChange={(e) => setAddForm({ ...addForm, job_title: e.target.value })}
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="add_department">Department</Label>
-                          <Input
-                            id="add_department"
-                            value={addForm.department || ''}
-                            onChange={(e) => setAddForm({ ...addForm, department: e.target.value })}
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="add_phone">Phone</Label>
-                          <Input
-                            id="add_phone"
-                            value={addForm.phone || ''}
-                            onChange={(e) => setAddForm({ ...addForm, phone: e.target.value })}
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="add_join_date">Join Date</Label>
-                          <Input
-                            id="add_join_date"
-                            type="date"
-                            value={addForm.join_date?.split('T')[0] || ''}
-                            onChange={(e) => setAddForm({ ...addForm, join_date: e.target.value })}
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="add_experience_years">Experience (Years)</Label>
-                          <Input
-                            id="add_experience_years"
-                            type="number"
-                            step="0.1"
-                            value={addForm.experience_years || 0}
-                            onChange={(e) => setAddForm({ ...addForm, experience_years: parseFloat(e.target.value) || 0 })}
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="add_employment_type">Employment Type</Label>
-                          <select
-                            id="add_employment_type"
-                            value={addForm.employment_type || 'Full-time'}
-                            onChange={(e) => setAddForm({ ...addForm, employment_type: e.target.value })}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          >
-                            <option value="Full-time">Full-time</option>
-                            <option value="Contract">Contract</option>
-                            <option value="Intern">Intern</option>
-                            <option value="Part-time">Part-time</option>
-                          </select>
-                        </div>
-                      </div>
-                      <div>
-                        <Label htmlFor="add_skills">Skills (comma-separated)</Label>
-                        <Input
-                          id="add_skills"
-                          value={Array.isArray(addForm.skills) ? addForm.skills.join(', ') : ''}
-                          onChange={(e) => setAddForm({
-                            ...addForm,
-                            skills: e.target.value.split(',').map(s => s.trim()).filter(s => s)
-                          })}
-                          placeholder="e.g., React, Node.js, TypeScript"
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="add_bio">Bio</Label>
-                        <Textarea
-                          id="add_bio"
-                          value={addForm.bio || ''}
-                          onChange={(e) => setAddForm({ ...addForm, bio: e.target.value })}
-                          rows={3}
-                        />
-                      </div>
-                    </>
-                  )}
-
-                  {/* Assets Tab - Show message for new profiles */}
-                  {activeTab === 'assets' && (
-                    <div className="text-center py-8">
-                      <Package className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-                      <p className="text-sm text-gray-500">Assets will be available after profile is created</p>
-                    </div>
-                  )}
-
-                  {/* ID Card Tab */}
-                  {activeTab === 'id-card' && (
-                    <div className="space-y-4">
-                      <div className="border-t pt-4">
-                        <h3 className="text-sm font-semibold mb-3">ID Card Information</h3>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <Label htmlFor="add_employee_id">Employee ID</Label>
-                            <Input
-                              id="add_employee_id"
-                              value={addForm.employee_id || ''}
-                              onChange={(e) => setAddForm({ ...addForm, employee_id: e.target.value })}
-                              placeholder="e.g., EMP001"
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="add_id_card_number">ID Card Number</Label>
-                            <Input
-                              id="add_id_card_number"
-                              value={(addForm as any).id_card_number || ''}
-                              onChange={(e) => setAddForm({ ...addForm, id_card_number: e.target.value } as any)}
-                              placeholder="e.g., ID123456"
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="add_id_card_issue_date">Issue Date</Label>
-                            <Input
-                              id="add_id_card_issue_date"
-                              type="date"
-                              value={(addForm as any).id_card_issue_date?.split('T')[0] || ''}
-                              onChange={(e) => setAddForm({ ...addForm, id_card_issue_date: e.target.value } as any)}
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="add_id_card_expiry_date">Expiry Date</Label>
-                            <Input
-                              id="add_id_card_expiry_date"
-                              type="date"
-                              value={(addForm as any).id_card_expiry_date?.split('T')[0] || ''}
-                              onChange={(e) => setAddForm({ ...addForm, id_card_expiry_date: e.target.value } as any)}
-                            />
-                          </div>
-                          <div className="col-span-2">
-                            <Label htmlFor="add_id_card_photo">ID Card Photo URL</Label>
-                            <Input
-                              id="add_id_card_photo"
-                              value={(addForm as any).id_card_photo || ''}
-                              onChange={(e) => setAddForm({ ...addForm, id_card_photo: e.target.value } as any)}
-                              placeholder="https://example.com/id-card.jpg"
-                            />
-                            <p className="text-xs text-gray-400 mt-1">
-                              Provide a URL to the ID card photo
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Projects Tab */}
-                  {activeTab === 'projects' && (
-                    <div className="space-y-4">
-                      <Card className="p-6">
-                        <div className="flex items-center justify-between mb-4">
-                          <h3 className="text-lg font-semibold flex items-center">
-                            <Briefcase className="h-5 w-5 mr-2" />
-                            Employee Projects
-                          </h3>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              const currentProjects = addForm.project_history || [];
-                              setAddForm({
-                                ...addForm,
-                                project_history: [
-                                  ...currentProjects,
-                                  {
-                                    name: '',
-                                    role: '',
-                                    start_date: '',
-                                    end_date: '',
-                                    description: '',
-                                  },
-                                ],
-                              });
-                            }}
-                          >
-                            <Plus className="h-4 w-4 mr-2" />
-                            Add Project
-                          </Button>
-                        </div>
-                        {addForm.project_history && addForm.project_history.length > 0 ? (
-                          <div className="space-y-3 max-h-96 overflow-y-auto">
-                            {addForm.project_history.map((project: any, idx: number) => (
-                              <div
-                                key={idx}
-                                className="p-3 border rounded-lg hover:bg-gray-50 space-y-2"
-                              >
-                                <div className="flex items-center justify-between">
-                                  <div className="flex items-center space-x-2">
-                                    <Briefcase className="h-4 w-4 text-gray-400" />
-                                    <span className="text-sm font-medium">Project {idx + 1}</span>
-                                  </div>
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => {
-                                      const updatedProjects = addForm.project_history?.filter((_, i) => i !== idx) || [];
-                                      setAddForm({ ...addForm, project_history: updatedProjects });
-                                    }}
-                                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </div>
-                                <div className="grid grid-cols-2 gap-2">
-                                  <div>
-                                    <Label className="text-xs">Project Name</Label>
-                                    <Input
-                                      placeholder="e.g., Project Alpha"
-                                      value={project.name || ''}
-                                      onChange={(e) => {
-                                        const updatedProjects = [...(addForm.project_history || [])];
-                                        updatedProjects[idx] = { ...updatedProjects[idx], name: e.target.value };
-                                        setAddForm({ ...addForm, project_history: updatedProjects });
-                                      }}
-                                    />
-                                  </div>
-                                  <div>
-                                    <Label className="text-xs">Role</Label>
-                                    <Input
-                                      placeholder="e.g., Developer, Lead"
-                                      value={project.role || ''}
-                                      onChange={(e) => {
-                                        const updatedProjects = [...(addForm.project_history || [])];
-                                        updatedProjects[idx] = { ...updatedProjects[idx], role: e.target.value };
-                                        setAddForm({ ...addForm, project_history: updatedProjects });
-                                      }}
-                                    />
-                                  </div>
-                                  <div>
-                                    <Label className="text-xs">Start Date</Label>
-                                    <Input
-                                      type="date"
-                                      value={project.start_date?.split('T')[0] || ''}
-                                      onChange={(e) => {
-                                        const updatedProjects = [...(addForm.project_history || [])];
-                                        updatedProjects[idx] = { ...updatedProjects[idx], start_date: e.target.value };
-                                        setAddForm({ ...addForm, project_history: updatedProjects });
-                                      }}
-                                    />
-                                  </div>
-                                  <div>
-                                    <Label className="text-xs">End Date</Label>
-                                    <Input
-                                      type="date"
-                                      value={project.end_date?.split('T')[0] || ''}
-                                      onChange={(e) => {
-                                        const updatedProjects = [...(addForm.project_history || [])];
-                                        updatedProjects[idx] = { ...updatedProjects[idx], end_date: e.target.value };
-                                        setAddForm({ ...addForm, project_history: updatedProjects });
-                                      }}
-                                    />
-                                  </div>
-                                  <div className="col-span-2">
-                                    <Label className="text-xs">Description</Label>
-                                    <Textarea
-                                      placeholder="Project description..."
-                                      value={project.description || ''}
-                                      onChange={(e) => {
-                                        const updatedProjects = [...(addForm.project_history || [])];
-                                        updatedProjects[idx] = { ...updatedProjects[idx], description: e.target.value };
-                                        setAddForm({ ...addForm, project_history: updatedProjects });
-                                      }}
-                                      rows={2}
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="text-center py-8">
-                            <Briefcase className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-                            <p className="text-sm text-gray-500">No projects added</p>
-                            <p className="text-xs text-gray-400 mt-1">Click "Add Project" to add a project entry</p>
-                          </div>
-                        )}
-                      </Card>
-                    </div>
-                  )}
-
-                  {/* Performance Tab */}
-                  {activeTab === 'performance' && (
-                    <div className="space-y-4">
-                      <Card className="p-6">
-                        <div className="flex items-center justify-between mb-4">
-                          <h3 className="text-lg font-semibold flex items-center">
-                            <Award className="h-5 w-5 mr-2" />
-                            Performance Reviews
-                          </h3>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              const currentReviews = addForm.performance_reviews || [];
-                              setAddForm({
-                                ...addForm,
-                                performance_reviews: [
-                                  ...currentReviews,
-                                  {
-                                    period: '',
-                                    rating: '',
-                                    summary: '',
-                                    date: new Date().toISOString(),
-                                  },
-                                ],
-                              });
-                            }}
-                          >
-                            <Plus className="h-4 w-4 mr-2" />
-                            Add Review
-                          </Button>
-                        </div>
-                        {addForm.performance_reviews && addForm.performance_reviews.length > 0 ? (
-                          <div className="space-y-3 max-h-96 overflow-y-auto">
-                            {addForm.performance_reviews.map((review: any, idx: number) => (
-                              <div
-                                key={idx}
-                                className="p-3 border rounded-lg hover:bg-gray-50 space-y-2"
-                              >
-                                <div className="flex items-center justify-between">
-                                  <div className="flex items-center space-x-2">
-                                    <Award className="h-4 w-4 text-gray-400" />
-                                    <span className="text-sm font-medium">Review {idx + 1}</span>
-                                  </div>
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => {
-                                      const updatedReviews = addForm.performance_reviews?.filter((_, i) => i !== idx) || [];
-                                      setAddForm({ ...addForm, performance_reviews: updatedReviews });
-                                    }}
-                                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </div>
-                                <div className="grid grid-cols-2 gap-2">
-                                  <div>
-                                    <Label className="text-xs">Period</Label>
-                                    <Input
-                                      placeholder="e.g., Q1 2024, Annual 2023"
-                                      value={review.period || review.title || ''}
-                                      onChange={(e) => {
-                                        const updatedReviews = [...(addForm.performance_reviews || [])];
-                                        updatedReviews[idx] = { ...updatedReviews[idx], period: e.target.value, title: e.target.value };
-                                        setAddForm({ ...addForm, performance_reviews: updatedReviews });
-                                      }}
-                                    />
-                                  </div>
-                                  <div>
-                                    <Label className="text-xs">Rating</Label>
-                                    <Input
-                                      placeholder="e.g., 4.5/5, Excellent"
-                                      value={review.rating || ''}
-                                      onChange={(e) => {
-                                        const updatedReviews = [...(addForm.performance_reviews || [])];
-                                        updatedReviews[idx] = { ...updatedReviews[idx], rating: e.target.value };
-                                        setAddForm({ ...addForm, performance_reviews: updatedReviews });
-                                      }}
-                                    />
-                                  </div>
-                                  <div>
-                                    <Label className="text-xs">Date</Label>
-                                    <Input
-                                      type="date"
-                                      value={review.date?.split('T')[0] || ''}
-                                      onChange={(e) => {
-                                        const updatedReviews = [...(addForm.performance_reviews || [])];
-                                        updatedReviews[idx] = { ...updatedReviews[idx], date: e.target.value };
-                                        setAddForm({ ...addForm, performance_reviews: updatedReviews });
-                                      }}
-                                    />
-                                  </div>
-                                  <div className="col-span-2">
-                                    <Label className="text-xs">Summary</Label>
-                                    <Textarea
-                                      placeholder="Performance review summary..."
-                                      value={review.summary || ''}
-                                      onChange={(e) => {
-                                        const updatedReviews = [...(addForm.performance_reviews || [])];
-                                        updatedReviews[idx] = { ...updatedReviews[idx], summary: e.target.value };
-                                        setAddForm({ ...addForm, performance_reviews: updatedReviews });
-                                      }}
-                                      rows={3}
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="text-center py-8">
-                            <Award className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-                            <p className="text-sm text-gray-500">No performance reviews added</p>
-                            <p className="text-xs text-gray-400 mt-1">Click "Add Review" to add a performance review</p>
-                          </div>
-                        )}
-                      </Card>
-                    </div>
-                  )}
-
-                  {/* Burnout Tab */}
-                  {activeTab === 'burnout' && (
-                    <div className="space-y-4">
-                      <div className="border-t pt-4">
-                        <h3 className="text-sm font-semibold mb-3">Burnout Risk Assessment</h3>
-                        <div>
-                          <Label htmlFor="add_burnout_score">Burnout Score (0-100)</Label>
-                          <Input
-                            id="add_burnout_score"
-                            type="number"
-                            min="0"
-                            max="100"
-                            value={addForm.burnout_score !== undefined && addForm.burnout_score !== null ? addForm.burnout_score : ''}
-                            onChange={(e) => setAddForm({
-                              ...addForm,
-                              burnout_score: e.target.value ? parseInt(e.target.value) : undefined
-                            })}
-                            placeholder="0-100"
-                          />
-                          <p className="text-xs text-gray-500 mt-1">
-                            0 = No risk, 100 = Critical risk
-                          </p>
-                          {addForm.burnout_score !== undefined && addForm.burnout_score !== null && (
-                            <div className="mt-3 p-3 rounded-lg bg-gray-50">
-                              <div className="flex items-center space-x-2">
-                                <Flame className={`h-5 w-5 ${getBurnoutLevel(addForm.burnout_score).color}`} />
-                                <span className={`text-sm font-semibold ${getBurnoutLevel(addForm.burnout_score).color}`}>
-                                  {getBurnoutLevel(addForm.burnout_score).level} Risk
-                                </span>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Activity Tab - Show message for new profiles */}
-                  {activeTab === 'activity' && (
-                    <div className="text-center py-8">
-                      <p className="text-sm text-gray-500">Activity log will be available after profile is created</p>
-                    </div>
-                  )}
-                </div>
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => {
-                    setIsAddOpen(false);
-                    setAddForm({
-                      email: '',
-                      full_name: '',
-                      job_title: '',
-                      department: '',
-                      phone: '',
-                      join_date: '',
-                      experience_years: 0,
-                      employment_type: 'Full-time',
-                    });
-                  }}>
-                    Cancel
-                  </Button>
-                  <Button onClick={handleAddProfile} disabled={updateProfileMutation.isPending || !addForm.email}>
-                    {updateProfileMutation.isPending ? (
-                      <>
-                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                        Creating...
-                      </>
-                    ) : (
-                      <>
-                        <Plus className="h-4 w-4 mr-2" />
-                        Create Profile
-                      </>
-                    )}
-                  </Button>
-                </DialogFooter>
+                <JoiningForm isModal onCancel={() => setIsAddOpen(false)} onComplete={() => { setIsAddOpen(false); refetchProfiles(); }} />
               </DialogContent>
             </Dialog>
           )}
@@ -1365,9 +857,11 @@ const Profiles = () => {
             Refresh
           </Button>
         </div>
+        )}
       </div>
 
       {/* Global Search Modal (Cmd+K) */}
+      {!onlyCurrentUser && (
       <ProfileSearchModal
         open={isSearchOpen}
         onOpenChange={setIsSearchOpen}
@@ -1380,8 +874,10 @@ const Profiles = () => {
           setIsSearchOpen(false);
         }}
       />
+      )}
 
       {/* Search and Filters */}
+      {!onlyCurrentUser && (
       <ProfileFilters
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
@@ -1403,6 +899,7 @@ const Profiles = () => {
         totalProfiles={profiles.length}
         filteredCount={filteredAndSortedProfiles.length}
       />
+      )}
 
       {/* Error Display */}
       {profilesError && (

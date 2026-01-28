@@ -11,6 +11,28 @@ import { useToast } from "@/hooks/use-toast";
 import { Calendar as CalendarIcon, Check, X, Clock, Plus, BarChart3, ClipboardList } from "lucide-react";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isToday, isBefore, startOfDay, addDays, startOfWeek, endOfWeek } from "date-fns";
 
+// Helper function to get current financial year (April to March)
+const getCurrentFinancialYear = () => {
+  const today = new Date();
+  const currentMonth = today.getMonth(); // 0-11 (0 = January)
+  const currentYear = today.getFullYear();
+  
+  // If current month is January to March (0-2), FY started in previous year
+  // If current month is April to December (3-11), FY started in current year
+  if (currentMonth < 3) {
+    return `${currentYear - 1}-${currentYear}`;
+  } else {
+    return `${currentYear}-${currentYear + 1}`;
+  }
+};
+
+// Helper function to display financial year in "April 1, YYYY to March 31, YYYY" format
+const getFinancialYearDisplay = (financialYear?: string) => {
+  const fy = financialYear || getCurrentFinancialYear();
+  const [startYear, endYear] = fy.split('-').map(Number);
+  return `April 1, ${startYear} to March 31, ${endYear}`;
+};
+
 // Tab type
 type TabType = 'calendar' | 'balance' | 'shifts' | 'attendance';
 
@@ -76,6 +98,10 @@ interface User {
 export default function LeaveCalendar() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  
+  // Debug - render immediately to check if component mounts
+  console.log('🔵 LeaveCalendar component MOUNTED');
+  
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -97,7 +123,7 @@ export default function LeaveCalendar() {
   const [balanceForm, setBalanceForm] = useState({
     user_id: '',
     leave_type: 'Casual Leave',
-    financial_year: '2025-2026',
+    financial_year: getCurrentFinancialYear(),
     opening_balance: 0,
     availed: 0,
     balance: 0,
@@ -119,6 +145,8 @@ export default function LeaveCalendar() {
   // Attendance state
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [attendanceMonth, setAttendanceMonth] = useState(new Date());
+  const [attendanceWeekStart, setAttendanceWeekStart] = useState(null);
+  const [attendanceViewMode, setAttendanceViewMode] = useState<'month' | 'week'>('month');
   
   const [showRequestDialog, setShowRequestDialog] = useState(false);
   const [selectedStartDate, setSelectedStartDate] = useState("");
@@ -133,13 +161,18 @@ export default function LeaveCalendar() {
     const initPage = async () => {
       try {
         const userData = JSON.parse(localStorage.getItem('user') || '{}');
+        console.log('Leave Calendar - User data:', userData);
+        
         if (!userData.id) {
-        navigate("/auth");
-        return;
-      }
+          console.log('Leave Calendar - No user ID, redirecting to auth');
+          navigate("/auth");
+          return;
+        }
 
         setCurrentUser(userData);
         const currentUserResp = await api.auth.getMe() as any;
+        console.log('Leave Calendar - Current user response:', currentUserResp);
+        
         // Check admin status from API response or localStorage
         const adminStatus = currentUserResp?.user?.role === 'admin' || userData?.role === 'admin';
         setIsAdmin(adminStatus);
@@ -154,9 +187,13 @@ export default function LeaveCalendar() {
         }
       } catch (error) {
         console.error('Error initializing leave calendar:', error);
-        navigate("/auth");
+        toast({
+          title: "Error",
+          description: "Failed to load leave calendar. Please try again.",
+          variant: "destructive",
+        });
       } finally {
-      setLoading(false);
+        setLoading(false);
       }
     };
 
@@ -232,7 +269,7 @@ export default function LeaveCalendar() {
         format(monthStart, 'yyyy-MM-dd'),
         format(monthEnd, 'yyyy-MM-dd')
       ) as any;
-      setAttendance(response.attendance || []);
+      setAttendance(response.attendance_records || response.attendance || []);
     } catch (error) {
       console.error("Error loading attendance:", error);
       setAttendance([]);
@@ -345,6 +382,7 @@ export default function LeaveCalendar() {
       case 'absent': return 'bg-red-100 text-red-800';
       case 'half_day': return 'bg-yellow-100 text-yellow-800';
       case 'on_leave': return 'bg-blue-100 text-blue-800';
+      case 'upcoming': return 'bg-gray-50 text-gray-400';
       default: return 'bg-gray-100 text-gray-800';
     }
   };
@@ -496,15 +534,23 @@ export default function LeaveCalendar() {
   };
 
   if (loading) {
+    console.log('Leave Calendar - Still loading...');
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-white">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading...</p>
+          <p className="mt-4 text-gray-600">Loading leave calendar...</p>
         </div>
       </div>
     );
   }
+
+  console.log('Leave Calendar - Rendering main content', {
+    isAdmin,
+    activeTab,
+    myLeaveRequestsCount: myLeaveRequests.length,
+    attendanceCount: attendance.length
+  });
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
@@ -777,8 +823,8 @@ export default function LeaveCalendar() {
                 <CardTitle className="flex items-center gap-2">
                   <BarChart3 className="h-5 w-5" />
                   {selectedBalanceUserId 
-                    ? `${allUsers.find((u: any) => u.id === selectedBalanceUserId)?.full_name || 'User'}'s Leave Balance (FY 2025-2026)`
-                    : 'My Leave Balance (FY 2025-2026)'
+                    ? `${allUsers.find((u: any) => u.id === selectedBalanceUserId)?.full_name || 'User'}'s Leave Balance (${getFinancialYearDisplay()})`
+                    : `My Leave Balance (${getFinancialYearDisplay()})`
                   }
                 </CardTitle>
                 {isAdmin && (
@@ -802,7 +848,7 @@ export default function LeaveCalendar() {
                     </thead>
                     <tbody>
                       {['Casual Leave', 'Privilege Leave', 'Sick Leave'].map(type => {
-                        const balance = leaveBalances.find(b => b.leave_type === type && b.financial_year === '2025-2026');
+                        const balance = leaveBalances.find(b => b.leave_type === type && b.financial_year === getCurrentFinancialYear());
                         return (
                           <tr key={type} className="hover:bg-gray-50">
                             <td className="border p-3 font-medium">{type}</td>
@@ -994,16 +1040,28 @@ export default function LeaveCalendar() {
                 </CardTitle>
                 <div className="flex gap-2">
                   <Button
+                    variant={attendanceViewMode === 'month' ? 'default' : 'outline'}
+                    onClick={() => setAttendanceViewMode('month')}
+                  >
+                    This Month
+                  </Button>
+                  <Button
+                    variant={attendanceViewMode === 'week' ? 'default' : 'outline'}
+                    onClick={() => {
+                      setAttendanceViewMode('week');
+                      const today = new Date();
+                      const start = new Date(today);
+                      start.setDate(today.getDate() - today.getDay()); // Sunday
+                      setAttendanceWeekStart(start);
+                    }}
+                  >
+                    This Week
+                  </Button>
+                  <Button
                     variant="outline"
                     onClick={() => setAttendanceMonth(new Date(attendanceMonth.setMonth(attendanceMonth.getMonth() - 1)))}
                   >
                     Previous Month
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => setAttendanceMonth(new Date())}
-                  >
-                    This Month
                   </Button>
                   <Button
                     variant="outline"
@@ -1016,11 +1074,27 @@ export default function LeaveCalendar() {
               <CardContent>
                 {/* Attendance Summary */}
                 {(() => {
-                  const filteredAttendance = attendance.filter(a => {
+                  let filteredAttendance = attendance.filter(a => {
                     if (!isAdmin) return a.user_id === currentUser?.id;
                     if (selectedAttendanceUserId) return a.user_id === selectedAttendanceUserId;
                     return true;
                   });
+                  // Hide upcoming days (future dates)
+                  const today = new Date();
+                  const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+                  filteredAttendance = filteredAttendance.filter(a => {
+                    const d = new Date(a.date);
+                    return d <= todayOnly;
+                  });
+                  if (attendanceViewMode === 'week' && attendanceWeekStart) {
+                    const weekStart = new Date(attendanceWeekStart);
+                    const weekEnd = new Date(weekStart);
+                    weekEnd.setDate(weekStart.getDate() + 6);
+                    filteredAttendance = filteredAttendance.filter(a => {
+                      const d = new Date(a.date);
+                      return d >= weekStart && d <= weekEnd && d <= todayOnly;
+                    });
+                  }
                   return (
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                       <div className="bg-green-50 rounded-lg p-4 text-center">
@@ -1084,9 +1158,13 @@ export default function LeaveCalendar() {
                               <td className="border p-3">{format(new Date(record.date), 'EEE, MMM d')}</td>
                               {isAdmin && <td className="border p-3">{record.full_name || record.email}</td>}
                               <td className="border p-3 text-center">
-                                <span className={`px-2 py-1 rounded text-xs font-medium ${getAttendanceStatusColor(record.status)}`}>
-                                  {record.status.replace('_', ' ').toUpperCase()}
-                                </span>
+                                {record.status === 'upcoming' || !record.status ? (
+                                  <span className={`px-2 py-1 rounded text-xs font-medium ${getAttendanceStatusColor(record.status)}`}> </span>
+                                ) : (
+                                  <span className={`px-2 py-1 rounded text-xs font-medium ${getAttendanceStatusColor(record.status)}`}>
+                                    {record.status.replace('_', ' ').toUpperCase()}
+                                  </span>
+                                )}
                               </td>
                               <td className="border p-3 text-center text-sm">{record.shift_type || '-'}</td>
                               <td className="border p-3 text-center text-sm">
@@ -1096,7 +1174,7 @@ export default function LeaveCalendar() {
                                 {record.clock_out ? format(new Date(record.clock_out), 'HH:mm') : '-'}
                               </td>
                               <td className="border p-3 text-center font-medium">
-                                {record.total_hours ? record.total_hours.toFixed(1) : '-'}
+                                {typeof record.total_hours === 'number' && !isNaN(record.total_hours) ? record.total_hours.toFixed(1) : '-'}
                               </td>
                             </tr>
                           ))
@@ -1235,8 +1313,16 @@ export default function LeaveCalendar() {
                 onChange={(e) => setBalanceForm({ ...balanceForm, financial_year: e.target.value })}
                 className="w-full p-2 border rounded"
               >
-                <option value="2025-2026">2025-2026</option>
-                <option value="2024-2025">2024-2025</option>
+                {(() => {
+                  const currentFY = getCurrentFinancialYear();
+                  const [startYear] = currentFY.split('-').map(Number);
+                  return (
+                    <>
+                      <option value={currentFY}>{getFinancialYearDisplay(currentFY)}</option>
+                      <option value={`${startYear - 1}-${startYear}`}>{getFinancialYearDisplay(`${startYear - 1}-${startYear}`)}</option>
+                    </>
+                  );
+                })()}
               </select>
             </div>
             <div className="grid grid-cols-2 gap-4">

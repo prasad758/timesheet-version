@@ -1,3 +1,16 @@
+// Create a new empty profile for onboarding
+export async function createEmptyProfile(profileId) {
+  await pool.query(`
+    INSERT INTO erp.profiles (id, onboarding_status, created_at, updated_at)
+    VALUES ($1, 'pending', now(), now())
+  `, [profileId]);
+  // Also create a user row if needed (for join with users table)
+  await pool.query(`
+    INSERT INTO erp.users (id, full_name, created_at, updated_at)
+    VALUES ($1, '', now(), now())
+    ON CONFLICT (id) DO NOTHING
+  `, [profileId]);
+}
 /**
  * Joining Form Model
  * PostgreSQL queries for employee onboarding data
@@ -125,6 +138,27 @@ export async function getJoiningFormById(profileId) {
 /**
  * Create or update employee information
  */
+
+// Helper to normalize date string to YYYY-MM-DD
+function normalizeDateString(date) {
+  if (!date) return null;
+  // Accepts both Date objects and strings
+  if (typeof date === 'string') {
+    // If already YYYY-MM-DD, return as is
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
+    // If ISO string, extract date part
+    const d = new Date(date);
+    if (!isNaN(d.getTime())) {
+      return d.toISOString().slice(0, 10);
+    }
+    return date;
+  }
+  if (date instanceof Date && !isNaN(date.getTime())) {
+    return date.toISOString().slice(0, 10);
+  }
+  return null;
+}
+
 export async function upsertEmployeeInfo(profileId, data) {
   const {
     full_name,
@@ -159,6 +193,10 @@ export async function upsertEmployeeInfo(profileId, data) {
       ? background_verification
       : JSON.stringify(background_verification))
     : null;
+
+  // Normalize date fields to YYYY-MM-DD
+  const normalizedDob = normalizeDateString(date_of_birth);
+  const normalizedJoinDate = normalizeDateString(join_date);
 
   await pool.query(`
     INSERT INTO erp.profiles (
@@ -200,9 +238,9 @@ export async function upsertEmployeeInfo(profileId, data) {
     profileId,
     full_name || null,
     employee_id || null,
-    date_of_birth || null,
+    normalizedDob || null,
     gender || null,
-    join_date || null,
+    normalizedJoinDate || null,
     designation || null,
     department || null,
     marital_status || null,
