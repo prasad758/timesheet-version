@@ -2,7 +2,10 @@
 import type { JoiningForm } from "./types";
 export async function createJoiningForm(data: Partial<JoiningForm>): Promise<JoiningForm> {
   // Step 1: Create new profile to get ID
-  const createRes = await api.post("/joining-form/create");
+  // Extract email from the joining form data (employee_info)
+  const email = data?.employee_info?.email;
+  if (!email) throw new Error("Email is required to create a profile");
+  const createRes = await api.post("/joining-form/create", { email });
   console.log('Create response:', createRes); // Debug log
   const profileId = createRes.profileId || (createRes.data && createRes.data.profileId);
   if (!profileId) throw new Error("Failed to create profileId");
