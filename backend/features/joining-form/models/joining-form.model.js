@@ -1,14 +1,15 @@
 // Create a new empty profile for onboarding
-export async function createEmptyProfile(profileId) {
+export async function createEmptyProfile(profileId, email) {
+  // First, create a user row (to satisfy FK constraint)
+  await pool.query(`
+    INSERT INTO erp.users (id, full_name, email, created_at, updated_at)
+    VALUES ($1, '', $2, now(), now())
+    ON CONFLICT (id) DO NOTHING
+  `, [profileId, email]);
+  // Then, create the profile row
   await pool.query(`
     INSERT INTO erp.profiles (id, onboarding_status, created_at, updated_at)
     VALUES ($1, 'pending', now(), now())
-  `, [profileId]);
-  // Also create a user row if needed (for join with users table)
-  await pool.query(`
-    INSERT INTO erp.users (id, full_name, created_at, updated_at)
-    VALUES ($1, '', now(), now())
-    ON CONFLICT (id) DO NOTHING
   `, [profileId]);
 }
 /**

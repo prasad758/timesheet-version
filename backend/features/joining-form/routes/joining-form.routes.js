@@ -1,30 +1,29 @@
 // Create a new profile for onboarding
+
+import express from 'express';
+const router = express.Router();
 import { v4 as uuidv4 } from 'uuid';
 import * as joiningFormModel from '../models/joining-form.model.js';
+import { authenticate } from '../../../core/auth/authMiddleware.js';
+import * as joiningFormController from '../controllers/joining-form.controller.js';
 
 // Create new profile (minimal info, returns new profileId)
 router.post('/create', async (req, res) => {
 	try {
+		const { email } = req.body;
+		if (!email) {
+			return res.status(400).json({ success: false, error: 'Email is required' });
+		}
 		const newProfileId = uuidv4();
-		console.log('[REAL UUID ROUTE HIT] Generated profileId:', newProfileId); // Unique debug log
-		// Insert minimal profile row (can be extended to accept initial data)
-		await joiningFormModel.createEmptyProfile(newProfileId);
+		console.log('[REAL UUID ROUTE HIT] Generated profileId:', newProfileId, 'Email:', email); // Unique debug log
+		// Insert minimal profile row with email
+		await joiningFormModel.createEmptyProfile(newProfileId, email);
 		res.json({ success: true, profileId: newProfileId });
 	} catch (error) {
 		console.error('[joining-form] Create profile error:', error);
 		res.status(500).json({ success: false, error: 'Failed to create profile' });
 	}
 });
-/**
- * Joining Form Routes
- * API endpoints for employee onboarding form
- */
-
-import express from 'express';
-import { authenticate } from '../../../core/auth/authMiddleware.js';
-import * as joiningFormController from '../controllers/joining-form.controller.js';
-
-const router = express.Router();
 
 // All routes require authentication
 router.use(authenticate);

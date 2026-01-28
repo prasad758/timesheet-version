@@ -637,64 +637,7 @@ const Profiles = ({ onlyCurrentUser = false }: ProfilesProps) => {
               id="profile-upload"
               className="hidden"
               accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.png,.jpg,.jpeg"
-              onChange={async (e) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
-
-                setIsUploading(true);
-                try {
-                  // Check if it's an Excel file for batch upload
-                  const isExcel = file.name.endsWith('.xlsx') || file.name.endsWith('.xls') || file.name.endsWith('.csv');
-
-                  if (isExcel) {
-                    // Batch upload
-                    const result = await uploadBatchProfiles(file);
-
-                    if (result.failed > 0) {
-                      // Show detailed errors for failed profiles
-                      const failedProfiles = result.results?.filter((r: any) => !r.success) || [];
-                      const errorDetails = failedProfiles
-                        .slice(0, 3) // Show first 3 errors
-                        .map((r: any) => `${r.name || r.email || 'Unknown'}: ${r.error || 'Unknown error'}`)
-                        .join('; ');
-
-                      toast({
-                        title: result.successful > 0 ? "Partial Success" : "Upload Failed",
-                        description: `${result.successful} succeeded, ${result.failed} failed. ${errorDetails}${failedProfiles.length > 3 ? '...' : ''}`,
-                        variant: result.successful > 0 ? "default" : "destructive",
-                      });
-                    } else {
-                      toast({
-                        title: "Success",
-                        description: `Uploaded ${result.successful} profiles successfully.`,
-                      });
-                    }
-                    refetchProfiles();
-                  } else {
-                    // Single file extraction
-                    const result = await uploadProfileFile(file);
-                    toast({
-                      title: "Success",
-                      description: "Profile extracted successfully. Review and save if needed.",
-                    });
-                    // Optionally open the extracted profile in edit mode
-                    if (result.profile) {
-                      setEditForm(result.profile);
-                      setIsEditOpen(true);
-                    }
-                  }
-                } catch (error: any) {
-                  toast({
-                    title: "Error",
-                    description: error.message || "Failed to upload file",
-                    variant: "destructive",
-                  });
-                } finally {
-                  setIsUploading(false);
-                  // Reset input
-                  e.target.value = '';
-                }
-              }}
+              // Removed quick-add profile logic. All new profiles should be added via the JoiningForm modal for consistency.
               disabled={isUploading}
             />
 
